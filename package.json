@@ -1,0 +1,38 @@
+{
+  "name": "circ-renderer",
+  "version": "1.0.0",
+  "description": "\"Logisim Circ file render and pseudo-simulator.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeffersonmourak/circ-renderer.git"
+  },
+  "author": "Jefferson Oliveira <jeffersonmourak@gmail.com>",
+  "license": "CC-BY-4.0",
+  "bugs": {
+    "url": "https://github.com/jeffersonmourak/circ-renderer/issues"
+  },
+  "homepage": "https://github.com/jeffersonmourak/circ-renderer#readme",
+  "devDependencies": {
+    "@types/lodash": "^4.17.13",
+    "@types/node": "^16.11.6",
+    "@typescript-eslint/eslint-plugin": "5.29.0",
+    "@typescript-eslint/parser": "5.29.0",
+    "builtin-modules": "3.3.0",
+    "esbuild": "0.17.3",
+    "obsidian": "latest",
+    "obsidian-typings": "^2.3.4",
+    "tslib": "2.4.0",
+    "typescript": "4.7.4"
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.10.6",
+    "lodash": "^4.17.21",
+    "uuid": "^11.0.3"
+  }
+}
