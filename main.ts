@@ -1,5 +1,6 @@
 import { buildCanvas } from "src/render";
 import InteractionEngine from "src/services/interaction";
+import SimulationEngine from "src/services/simulation";
 import {
   type CircTheme as BaseCircTheme,
   type ThemeColor as BaseThemeColor,
@@ -13,6 +14,8 @@ export type CircRendererConfig = {
 export type CircTheme = BaseCircTheme;
 export type ThemeColor = BaseThemeColor;
 
+const gridSize = 10;
+
 export function CircRenderer(
   input: string,
   initialWidth: number,
@@ -24,10 +27,17 @@ export function CircRenderer(
   };
 
   const interactionEngine = new InteractionEngine();
+  const simulationEngine = new SimulationEngine(gridSize, 20, 20);
 
-  const element = buildCanvas(input, interactionEngine, initialWidth, {
-    theme: effectiveTheme,
-  });
+  const element = buildCanvas(
+    input,
+    interactionEngine,
+    simulationEngine,
+    initialWidth,
+    {
+      theme: effectiveTheme,
+    }
+  );
 
   element.addEventListener("mousemove", (e) => {
     const x = e.offsetX;

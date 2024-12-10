@@ -2,7 +2,7 @@ import { partition, throttle } from "lodash";
 import { createCanvasController } from "./canvasController";
 import type InteractionEngine from "./services/interaction";
 import { type Component, parseCircuit } from "./services/parser";
-import SimulationEngine from "./services/simulation";
+import type SimulationEngine from "./services/simulation";
 import { type CnMat2x2, resolveCn } from "./utils";
 import { pt } from "./utils/renderPoints";
 import type { CircTheme } from "./utils/theme";
@@ -50,6 +50,7 @@ function renderComponentPorts<S>(
 export function buildCanvas(
   content: string,
   interaction: InteractionEngine,
+  simulation: SimulationEngine,
   initialWidth: number,
   options: BuildCanvasOptions
 ) {
@@ -70,12 +71,9 @@ export function buildCanvas(
     }
   }
 
-  const gridSize = 10;
   const circuit = parseCircuit(xmlDoc.getElementsByTagName("circuit")[0]);
 
   const [wires, components] = partition(circuit, (c) => c.name === "wire");
-
-  const simulation = new SimulationEngine(gridSize, 20, 20);
 
   simulation.connectWires(wires);
   simulation.connectPorts(components);
@@ -125,11 +123,16 @@ export function buildCanvas(
       // Draw grid dots
       ctx.fillStyle = options.theme.colors.blue;
 
-      const toGridIndex = (value: number) =>
-        ~~(value / context.size / gridSize);
-
-      for (let x = 0; x < canvas.width; x += context.size * gridSize) {
-        for (let y = 0; y < canvas.height; y += context.size * gridSize) {
+      for (
+        let x = 0;
+        x < canvas.width;
+        x += context.size * simulation.gridSize
+      ) {
+        for (
+          let y = 0;
+          y < canvas.height;
+          y += context.size * simulation.gridSize
+        ) {
           ctx.beginPath();
           ctx.arc(x, y, 1, 0, 2 * Math.PI);
           ctx.fill();
