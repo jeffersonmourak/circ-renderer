@@ -46,7 +46,7 @@ export function CircRenderer(
   config: CircRendererConfig = {}
 ): HTMLElement {
   const effectiveTheme: CircTheme = config.theme ?? baseTheme;
-  const scale = config.scale ?? 3;
+  const { width = 640, height = 480, scale = 3 } = config;
 
   const interactionEngine = new InteractionEngine();
   const simulationEngine = new SimulationEngine(gridSize, 20, 20);
@@ -54,28 +54,55 @@ export function CircRenderer(
   const element = buildCanvas(input, interactionEngine, simulationEngine, {
     theme: effectiveTheme,
     scale,
-    width: config.width ?? 640,
-    height: config.height ?? 480,
+    width,
+    height,
   });
 
   element.addEventListener("mousemove", (e) => {
     const x = e.offsetX;
     const y = e.offsetY;
 
-    interactionEngine.notifyPointerInteraction([x, y, undefined]);
+    const { width: eWidth, height: eHeight } = element.getBoundingClientRect();
+
+    const xAmplification = width / eWidth;
+    const yAmplification = height / eHeight;
+
+    interactionEngine.notifyPointerInteraction([
+      x * xAmplification,
+      y * yAmplification,
+      undefined,
+    ]);
   });
 
   element.addEventListener("mousedown", (e) => {
     const x = e.offsetX;
     const y = e.offsetY;
 
-    interactionEngine.notifyPointerInteraction([x, y, true]);
+    const { width: eWidth, height: eHeight } = element.getBoundingClientRect();
+
+    const xAmplification = width / eWidth;
+    const yAmplification = height / eHeight;
+
+    interactionEngine.notifyPointerInteraction([
+      x * xAmplification,
+      y * yAmplification,
+      true,
+    ]);
   });
   element.addEventListener("mouseup", (e) => {
     const x = e.offsetX;
     const y = e.offsetY;
 
-    interactionEngine.notifyPointerInteraction([x, y, false]);
+    const { width: eWidth, height: eHeight } = element.getBoundingClientRect();
+
+    const xAmplification = width / eWidth;
+    const yAmplification = height / eHeight;
+
+    interactionEngine.notifyPointerInteraction([
+      x * xAmplification,
+      y * yAmplification,
+      false,
+    ]);
   });
 
   return element;
