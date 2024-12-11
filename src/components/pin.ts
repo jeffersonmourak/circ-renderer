@@ -1,7 +1,7 @@
 import { cn, resolveCn } from "src/utils";
 import type { ComponentDefinition } from "../services/parser";
 
-type PinState = {
+export type PinState = {
   output: boolean;
 };
 
@@ -16,7 +16,21 @@ export const pinComponentDefinition = {
   ports: ({ output }) => [[cn(5), cn(0), output ? "input" : "output"]],
   defaultFacing: "east",
   faceAngles: [270, 0, 90, 180],
-  draw({ bounds, ctx, theme, state, pointerLocation, scaleFactor = 1 }) {
+  draw(drawArgs) {
+    if (drawArgs.theme.library?.pin) {
+      drawArgs.theme.library.pin(drawArgs);
+      return;
+    }
+
+    const {
+      bounds,
+      ctx,
+      theme,
+      state,
+      pointerLocation,
+      scaleFactor = 1,
+    } = drawArgs;
+
     const [loc, dim] = bounds;
 
     const [ogX, ogY] = loc;

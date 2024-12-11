@@ -30,8 +30,13 @@ export const wireComponentDefinition = {
   ports: [],
   faceAngles: [0, 0, 0, 0],
   defaultFacing: "east",
-  draw({ bounds, ctx, theme, state, pointerLocation, scaleFactor = 1 }) {
-    const [loc, dim] = bounds;
+  draw(drawArgs) {
+    if (drawArgs.theme.library?.wire) {
+      drawArgs.theme.library.wire(drawArgs);
+      return;
+    }
+
+    const { ctx, theme, state, scaleFactor = 1 } = drawArgs;
 
     const [x1, y1] = state.from;
     const [x2, y2] = state.to;

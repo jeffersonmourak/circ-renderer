@@ -8,7 +8,8 @@ export interface RenderInfo {
 
 export interface RuntimeConfig {
   limitFPS?: number;
-  initialWidth: number;
+  width: number;
+  height: number;
   theme: CircTheme;
 }
 
@@ -29,10 +30,10 @@ export function createCanvasController({
   update = () => {},
 }: CreateCanvasControllerOptions) {
   const canvasElement = document.createElement("canvas");
-  const { limitFPS = 60, initialWidth = 300, theme } = config ?? {};
+  const { limitFPS = 60, width = 300, height = 300, theme } = config ?? {};
 
-  canvasElement.width = initialWidth || 300;
-  canvasElement.height = initialWidth || 300;
+  canvasElement.width = width;
+  canvasElement.height = height;
 
   const ctx = canvasElement.getContext("2d");
 

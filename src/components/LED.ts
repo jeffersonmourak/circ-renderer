@@ -1,7 +1,7 @@
 import { cn, resolveCn } from "src/utils";
 import type { ComponentDefinition } from "../services/parser";
 
-type LEDState = {
+export type LEDState = {
   color: string;
   offColor: string;
 };
@@ -18,7 +18,14 @@ export const ledComponentDefinition = {
   ports: [[cn(5), cn(0), "input"]],
   faceAngles: [270, 0, 90, 180],
   defaultFacing: "west",
-  draw({ ctx, state, scaleFactor = 1, bounds, portsSignals }) {
+  draw(drawArgs) {
+    if (drawArgs.theme.library?.LED) {
+      drawArgs.theme.library.LED(drawArgs);
+      return;
+    }
+
+    const { ctx, state, scaleFactor = 1, bounds, portsSignals } = drawArgs;
+
     const [loc, dim] = bounds;
 
     const [x, y] = loc;

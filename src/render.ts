@@ -3,6 +3,7 @@ import { createCanvasController } from "./canvasController";
 import type InteractionEngine from "./services/interaction";
 import { type Component, parseCircuit } from "./services/parser";
 import type SimulationEngine from "./services/simulation";
+import type { ElectricSignal } from "./services/simulation";
 import { type CnMat2x2, resolveCn } from "./utils";
 import { pt } from "./utils/renderPoints";
 import type { CircTheme } from "./utils/theme";
@@ -19,14 +20,22 @@ const DEFAULT_RENDER_CONTEXT: RenderContext = {
 
 type BuildCanvasOptions = {
   theme: CircTheme;
+  scale: number;
+  width: number;
+  height: number;
 };
 
 function renderComponentPorts<S>(
   ctx: CanvasRenderingContext2D,
   component: Component<S>,
-  scaleFactor: number
+  scaleFactor: number,
+  signals: ElectricSignal[],
+  theme: CircTheme
 ) {
-  for (const port of component.ports) {
+  for (let i = 0; i < component.ports.length; i++) {
+    const port = component.ports[i];
+    const signal = signals[i];
+
     const [portX, portY, _mode] = port;
     const [resolvedX, resolvedY] = [
       resolveCn(portX, scaleFactor),
@@ -42,8 +51,12 @@ function renderComponentPorts<S>(
       scaleFactor
     );
 
-    ctx.fillStyle = "red";
-    ctx.fillRect(rotatedPortX - 2.5, rotatedPortY - 2.5, 5, 5);
+    ctx.beginPath();
+    ctx.arc(rotatedPortX, rotatedPortY, 1.3 * scaleFactor, 0, 2 * Math.PI);
+    ctx.fillStyle = signal === 0 ? theme.colors.base35 : theme.colors.orange;
+    ctx.fill();
+    ctx.closePath();
+    // ctx.fillRect(rotatedPortX - 2.5, rotatedPortY - 2.5, 5, 5);
   }
 }
 
@@ -51,7 +64,6 @@ export function buildCanvas(
   content: string,
   interaction: InteractionEngine,
   simulation: SimulationEngine,
-  initialWidth: number,
   options: BuildCanvasOptions
 ) {
   const parser = new DOMParser();
@@ -108,7 +120,7 @@ export function buildCanvas(
   const collidingComponents = new Set<number>();
 
   const canvasElement = createCanvasController({
-    initialContext: { ...DEFAULT_RENDER_CONTEXT },
+    initialContext: { ...DEFAULT_RENDER_CONTEXT, size: options.scale },
     draw: ({ canvas, context }) => {
       const ctx = canvas.getContext("2d");
 
@@ -116,8 +128,10 @@ export function buildCanvas(
         throw new Error("Could not get 2d context");
       }
 
+      ctx.translate(10, 10);
+
       // Draw background
-      ctx.fillStyle = options.theme.colors.backgroundSecondary;
+      ctx.fillStyle = options.theme.colors.backgroundPrimary;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Draw grid dots
@@ -134,7 +148,7 @@ export function buildCanvas(
           y += context.size * simulation.gridSize
         ) {
           ctx.beginPath();
-          ctx.arc(x, y, 1, 0, 2 * Math.PI);
+          ctx.arc(x, y, (1 / 2) * options.scale, 0, 2 * Math.PI);
           ctx.fill();
         }
       }
@@ -185,8 +199,16 @@ export function buildCanvas(
         });
       }
 
-      for (const component of components) {
-        renderComponentPorts(ctx, component, context.size);
+      for (let i = 0; i < components.length; i++) {
+        const component = components[i];
+        const portsSignals = simulation.portsSignals[i];
+        renderComponentPorts(
+          ctx,
+          component,
+          context.size,
+          portsSignals,
+          options.theme
+        );
       }
 
       if (context.pointerLocation) {
@@ -207,6 +229,8 @@ export function buildCanvas(
         ctx.closePath();
       }
       canvas.style.cursor = "none";
+
+      ctx.translate(-10, -10);
     },
     update: ({ context }) => {
       context.pointerLocation = interaction.getPointerLocation();
@@ -222,7 +246,8 @@ export function buildCanvas(
     },
     config: {
       limitFPS: 60,
-      initialWidth,
+      width: options.width,
+      height: options.height,
       theme: options.theme,
     },
   });

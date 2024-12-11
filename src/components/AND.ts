@@ -1,27 +1,28 @@
 import { cn, resolveCn } from "src/utils";
 import type { ComponentDefinition } from "../services/parser";
 
-export type NotState = {
+export type AndState = {
   size: number;
 };
 
-export const notComponentDefinition = {
-  name: "NOT",
+export const andComponentDefinition = {
+  name: "AND",
   parse(values: Record<string, string | null>) {
     return {
-      size: Number.parseInt(values.size ?? "10"),
+      size: Number.parseInt(values.size ?? "30"),
     };
   },
-  dimensions: ({ size }) => [size, 10],
+  dimensions: ({ size }) => [size, size],
   ports: ({ size }) => [
-    [cn(-size / 2), cn(0), "input"],
+    [cn(-size / 2), cn(-size / 2 + 5), "input"],
+    [cn(-size / 2), cn(size / 2 - 5), "input"],
     [cn(size / 2), cn(0), "output"],
   ],
   defaultFacing: "east",
   faceAngles: [0, 0, 0, 0],
   draw(drawArgs) {
-    if (drawArgs.theme.library?.NOT) {
-      drawArgs.theme.library.NOT(drawArgs);
+    if (drawArgs.theme.library?.AND) {
+      drawArgs.theme.library.AND(drawArgs);
       return;
     }
 
@@ -43,6 +44,8 @@ export const notComponentDefinition = {
   },
 
   onSignalChange(signal) {
-    return [signal[0], signal[0] === 0 ? 1 : 0];
+    const [a, b] = signal;
+
+    return [a, b, a && b];
   },
-} satisfies ComponentDefinition<NotState>;
+} satisfies ComponentDefinition<AndState>;

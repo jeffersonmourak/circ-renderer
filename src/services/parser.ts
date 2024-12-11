@@ -1,3 +1,5 @@
+import { andComponentDefinition } from "src/components/AND";
+import { nandComponentDefinition } from "src/components/NAND";
 import { notComponentDefinition } from "src/components/NOT";
 import {
   type CircTheme,
@@ -21,7 +23,7 @@ export type ComponentState = {
   face: ComponentFace;
 };
 
-type DrawArguments<S> = {
+export type DrawArguments<S> = {
   scaleFactor?: number;
   ctx: CanvasRenderingContext2D;
   theme: CircTheme;
@@ -169,6 +171,8 @@ const Library = {
   Pin: pinComponentDefinition,
   LED: ledComponentDefinition,
   "NOT Gate": notComponentDefinition,
+  "AND Gate": andComponentDefinition,
+  "NAND Gate": nandComponentDefinition,
 };
 
 export const parseCircuit = (root: Element) => {
