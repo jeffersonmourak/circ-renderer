@@ -41,6 +41,12 @@ export type ThemeColor = BaseThemeColor;
 
 const gridSize = 10;
 
+function parseTouchPoint(touch: Touch, element: HTMLElement): [number, number] {
+  const { left, top } = element.getBoundingClientRect();
+
+  return [touch.clientX - left, touch.clientY - top];
+}
+
 export function CircRenderer(
   input: string,
   config: CircRendererConfig = {}
@@ -58,10 +64,7 @@ export function CircRenderer(
     height,
   });
 
-  element.addEventListener("mousemove", (e) => {
-    const x = e.offsetX;
-    const y = e.offsetY;
-
+  function movePointer(x: number, y: number) {
     const { width: eWidth, height: eHeight } = element.getBoundingClientRect();
 
     const xAmplification = width / eWidth;
@@ -72,12 +75,9 @@ export function CircRenderer(
       y * yAmplification,
       undefined,
     ]);
-  });
+  }
 
-  element.addEventListener("mousedown", (e) => {
-    const x = e.offsetX;
-    const y = e.offsetY;
-
+  function lowerPointer(x: number, y: number) {
     const { width: eWidth, height: eHeight } = element.getBoundingClientRect();
 
     const xAmplification = width / eWidth;
@@ -88,11 +88,9 @@ export function CircRenderer(
       y * yAmplification,
       true,
     ]);
-  });
-  element.addEventListener("mouseup", (e) => {
-    const x = e.offsetX;
-    const y = e.offsetY;
+  }
 
+  function raisePointer(x: number, y: number) {
     const { width: eWidth, height: eHeight } = element.getBoundingClientRect();
 
     const xAmplification = width / eWidth;
@@ -103,6 +101,44 @@ export function CircRenderer(
       y * yAmplification,
       false,
     ]);
+  }
+
+  element.addEventListener("mousemove", (e) => {
+    const x = e.offsetX;
+    const y = e.offsetY;
+
+    movePointer(x, y);
+  });
+
+  element.addEventListener("mousedown", (e) => {
+    const x = e.offsetX;
+    const y = e.offsetY;
+
+    lowerPointer(x, y);
+  });
+  element.addEventListener("mouseup", (e) => {
+    const x = e.offsetX;
+    const y = e.offsetY;
+
+    raisePointer(x, y);
+  });
+
+  element.addEventListener("touchmove", (e) => {
+    const touch = e.changedTouches[0];
+
+    movePointer(...parseTouchPoint(touch, element));
+  });
+
+  element.addEventListener("touchstart", (e) => {
+    const touch = e.changedTouches[0];
+
+    lowerPointer(...parseTouchPoint(touch, element));
+  });
+
+  element.addEventListener("touchend", (e) => {
+    const touch = e.changedTouches[0];
+
+    raisePointer(...parseTouchPoint(touch, element));
   });
 
   return element;
