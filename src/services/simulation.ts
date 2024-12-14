@@ -168,7 +168,12 @@ class SimulationEngine {
       const portsSignals = this.portsSignals[componentIndex];
 
       const hasChanged = portsSignals.some(
-        (signal, index) => signal !== wireSignals[index][0]
+        (signal, index) =>
+          signal !==
+          (wireSignals[index]?.reduce(
+            (a, b) => (a === 1 || b === 1 ? 1 : 0),
+            0
+          ) ?? 0)
       );
 
       if (hasChanged) {
