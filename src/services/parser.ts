@@ -2,6 +2,7 @@ import { andComponentDefinition } from "src/components/AND";
 import { nandComponentDefinition } from "src/components/NAND";
 import { notComponentDefinition } from "src/components/NOT";
 import { orComponentDefinition } from "src/components/OR";
+import { xorComponentDefinition } from "src/components/XOR";
 import {
   type CircTheme,
   type CnMat2x2,
@@ -175,6 +176,7 @@ const Library = {
   "AND Gate": andComponentDefinition,
   "NAND Gate": nandComponentDefinition,
   "OR Gate": orComponentDefinition,
+  "XOR Gate": xorComponentDefinition,
 };
 
 export const parseCircuit = (root: Element) => {
