@@ -21,8 +21,8 @@ export const xorComponentDefinition = {
   defaultFacing: "east",
   faceAngles: [0, 0, 0, 0],
   draw(drawArgs) {
-    if (drawArgs.theme.library?.NAND) {
-      drawArgs.theme.library.NAND(drawArgs);
+    if (drawArgs.theme.library?.XOR) {
+      drawArgs.theme.library.XOR(drawArgs);
       return;
     }
 
