@@ -1,11 +1,12 @@
 {
   "name": "circ-renderer",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "\"Logisim Circ file render and pseudo-simulator.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.dev.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+    "build": "node esbuild.config.mjs production",
+    "publish": "npm run build && npm publish"
   },
   "repository": {
     "type": "git",

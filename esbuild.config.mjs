@@ -17,8 +17,7 @@ const context = await esbuild.context({
 	},
 	entryPoints: ["main.ts"],
 	bundle: true,
-	external: [
-		...builtins],
+	external: [...builtins],
 	format: "cjs",
 	target: "es2018",
 	logLevel: "info",
