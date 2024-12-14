@@ -1,12 +1,12 @@
 import { cn, resolveCn } from "src/utils";
 import type { ComponentDefinition } from "../services/parser";
 
-export type NandState = {
+export type OrState = {
   size: number;
 };
 
-export const nandComponentDefinition = {
-  name: "AND",
+export const orComponentDefinition = {
+  name: "OR",
   parse(values: Record<string, string | null>) {
     return {
       size: Number.parseInt(values.size ?? "30"),
@@ -14,15 +14,15 @@ export const nandComponentDefinition = {
   },
   dimensions: ({ size }) => [size, size],
   ports: ({ size }) => [
-    [cn(-size + 5), cn(-size / 2 + 5), "input"],
-    [cn(-size + 5), cn(size / 2 - 5), "input"],
+    [cn(-size / 2), cn(-size / 2 + 5), "input"],
+    [cn(-size / 2), cn(size / 2 - 5), "input"],
     [cn(size / 2), cn(0), "output"],
   ],
   defaultFacing: "east",
   faceAngles: [0, 0, 0, 0],
   draw(drawArgs) {
-    if (drawArgs.theme.library?.NAND) {
-      drawArgs.theme.library.NAND(drawArgs);
+    if (drawArgs.theme.library?.OR) {
+      drawArgs.theme.library.OR(drawArgs);
       return;
     }
 
@@ -46,8 +46,8 @@ export const nandComponentDefinition = {
   onSignalChange(signal) {
     const [a, b] = signal;
 
-    const result = a === 1 && b === 1 ? 0 : 1;
+    const result = a === 1 || b === 1 ? 1 : 0;
 
     return [a, b, result];
   },
-} satisfies ComponentDefinition<NandState>;
+} satisfies ComponentDefinition<OrState>;
