@@ -36,6 +36,7 @@ export type DrawArguments<S> = {
   faceAngles: [number, number, number, number];
   ports: Port[];
   portsSignals: ElectricSignal[];
+  assets: Record<string, HTMLImageElement>;
 };
 
 export type PortMode = "input" | "output";
@@ -57,6 +58,7 @@ export type ComponentDefinition<S> = {
   faceAngles: [number, number, number, number];
   skipLocationCheck?: boolean;
   ports: Port[] | ((state: S) => Port[]);
+  loadAssets?: () => Promise<Record<string, HTMLImageElement>>;
 };
 
 export type Component<S> = {
@@ -72,6 +74,7 @@ export type Component<S> = {
   ) => ElectricSignal[];
   faceAngles: [number, number, number, number];
   ports: Port[];
+  assets: Record<string, HTMLImageElement>;
 };
 
 export const getFacingOffset = (facing: ComponentFace) => {
@@ -87,7 +90,7 @@ export const getFacingOffset = (facing: ComponentFace) => {
   }
 };
 
-export const parseComponent = <S>(
+export const parseComponent = async <S>(
   component: Element,
   {
     parse,
@@ -98,7 +101,7 @@ export const parseComponent = <S>(
     ports,
     ...defs
   }: ComponentDefinition<S>
-): Component<S> => {
+): Promise<Component<S>> => {
   const locationAttribute = component.getAttribute("loc");
 
   if (!skipLocationCheck && !locationAttribute) {
@@ -160,9 +163,12 @@ export const parseComponent = <S>(
     cn((m) => (ogY + offsetY) * m),
   ] satisfies CnVector2;
 
+  const assets = defs.loadAssets ? await defs.loadAssets() : {};
+
   return {
     state,
     facing,
+    assets,
     ports: Array.isArray(ports) ? ports : ports(state),
     bounds: [normalizedLocation, dimensionValues],
     ...defs,
@@ -179,7 +185,7 @@ const Library = {
   "XOR Gate": xorComponentDefinition,
 };
 
-export const parseCircuit = (root: Element) => {
+export const parseCircuit = async (root: Element) => {
   // biome-ignore lint/suspicious/noExplicitAny: This is a hack to get around the type system
   const parsedComponents: Component<any>[] = [];
 
@@ -195,7 +201,9 @@ export const parseCircuit = (root: Element) => {
     }
 
     if (type === "wire") {
-      parsedComponents.push(parseComponent(component, wireComponentDefinition));
+      parsedComponents.push(
+        await parseComponent(component, wireComponentDefinition)
+      );
       continue;
     }
 
@@ -211,7 +219,7 @@ export const parseCircuit = (root: Element) => {
     }
 
     // @ts-expect-error - This is a hack to get around the type system
-    const parsedComponent = parseComponent(component, libraryComponent);
+    const parsedComponent = await parseComponent(component, libraryComponent);
 
     parsedComponents.push(parsedComponent);
   }

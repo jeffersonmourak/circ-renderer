@@ -1,4 +1,5 @@
 import { cn, resolveCn } from "src/utils";
+import { toFaceIndex } from "src/utils/renderPoints";
 import type { ComponentDefinition } from "../services/parser";
 
 export type XorState = {
@@ -12,6 +13,9 @@ export const xorComponentDefinition = {
       size: Number.parseInt(values.size ?? "30"),
     };
   },
+  async loadAssets() {
+    return {};
+  },
   dimensions: ({ size }) => [size, size],
   ports: ({ size }) => [
     [cn(-size + 5), cn(-size / 2 + 5), "input"],
@@ -19,14 +23,27 @@ export const xorComponentDefinition = {
     [cn(size / 2), cn(0), "output"],
   ],
   defaultFacing: "east",
-  faceAngles: [0, 0, 0, 0],
+  faceAngles: [-90, 0, 90, 180],
   draw(drawArgs) {
     if (drawArgs.theme.library?.XOR) {
       drawArgs.theme.library.XOR(drawArgs);
       return;
     }
 
-    const { bounds, ctx, theme, scaleFactor = 1 } = drawArgs;
+    const {
+      bounds,
+      ctx,
+      theme,
+      scaleFactor = 1,
+      assets,
+      faceAngles,
+    } = drawArgs;
+
+    ctx.save();
+
+    const angle = faceAngles[toFaceIndex(drawArgs.face)] + 90;
+
+    const rad = (angle * Math.PI) / 180;
 
     const [loc, dim] = bounds;
 
@@ -41,6 +58,8 @@ export const xorComponentDefinition = {
       resolveCn(width, scaleFactor),
       resolveCn(height, scaleFactor)
     );
+
+    ctx.restore();
   },
 
   onSignalChange(signal) {

@@ -36,7 +36,7 @@ export function getBoxMiddle(bounds: Mat2x2 | CnMat2x2) {
  */
 export type FaceAngles = [number, number, number, number];
 
-const toFaceIndex = (face: ComponentFace) => {
+export const toFaceIndex = (face: ComponentFace) => {
   switch (face) {
     case "north":
       return 0;

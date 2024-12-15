@@ -9,6 +9,8 @@ import {
 
 import type { DrawArguments as ParserDrawArguments } from "src/services/parser";
 
+import { toFaceIndex as toFaceIndexFn } from "src/utils/renderPoints";
+
 import type { AndState as TAndState } from "src/components/AND";
 import type { LEDState as TLEDState } from "src/components/LED";
 import type { NandState as TNandState } from "src/components/NAND";
@@ -24,6 +26,8 @@ export type PinState = TPinState;
 export type WireState = TWireState;
 export type AndState = TAndState;
 export type NandState = TNandState;
+
+export const toFaceIndex = toFaceIndexFn;
 
 export const resolveCn = rcn;
 

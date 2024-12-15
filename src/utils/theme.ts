@@ -4,7 +4,7 @@ const baseThemeColors = {
 	primary: "#007bff",
 	primary1: "#007bff",
 	primary2: "#0056b3",
-	backgroundPrimary: "#ffffff",
+	backgroundPrimary: "#f8f9fa",
 	backgroundPrimaryAlt: "#f8f9fa",
 	backgroundSecondary: "#f8f9fa",
 	red: "#dc3545",

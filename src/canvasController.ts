@@ -23,13 +23,15 @@ export interface CreateCanvasControllerOptions {
   config?: RuntimeConfig;
 }
 
-export function createCanvasController({
-  initialContext,
-  draw,
-  config,
-  update = () => {},
-}: CreateCanvasControllerOptions) {
-  const canvasElement = document.createElement("canvas");
+export function createCanvasController(
+  canvasElement: HTMLCanvasElement,
+  {
+    initialContext,
+    draw,
+    config,
+    update = () => {},
+  }: CreateCanvasControllerOptions
+) {
   const { limitFPS = 60, width = 300, height = 300, theme } = config ?? {};
 
   canvasElement.width = width;
@@ -65,6 +67,4 @@ export function createCanvasController({
   }
 
   tref = requestAnimationFrame(renderLoop);
-
-  return canvasElement;
 }
