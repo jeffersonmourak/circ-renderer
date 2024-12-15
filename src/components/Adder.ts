@@ -1,12 +1,12 @@
 import { cn, resolveCn } from "src/utils";
 import type { ComponentDefinition } from "../services/parser";
 
-export type NandState = {
+export type AdderState = {
   size: number;
 };
 
-export const nandComponentDefinition = {
-  name: "NAND",
+export const adderComponentDefinition = {
+  name: "Adder",
   parse(values: Record<string, string | null>) {
     return {
       size: Number.parseInt(values.size ?? "30"),
@@ -50,4 +50,4 @@ export const nandComponentDefinition = {
 
     return [a, b, result];
   },
-} satisfies ComponentDefinition<NandState>;
+} satisfies ComponentDefinition<AdderState>;

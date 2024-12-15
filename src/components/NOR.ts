@@ -1,16 +1,20 @@
 import { cn, resolveCn } from "src/utils";
+import { toFaceIndex } from "src/utils/renderPoints";
 import type { ComponentDefinition } from "../services/parser";
 
-export type NandState = {
+export type NorState = {
   size: number;
 };
 
-export const nandComponentDefinition = {
-  name: "NAND",
+export const norComponentDefinition = {
+  name: "NOR",
   parse(values: Record<string, string | null>) {
     return {
       size: Number.parseInt(values.size ?? "30"),
     };
+  },
+  async loadAssets() {
+    return {};
   },
   dimensions: ({ size }) => [size, size],
   ports: ({ size }) => [
@@ -19,14 +23,27 @@ export const nandComponentDefinition = {
     [cn(size / 2), cn(0), "output"],
   ],
   defaultFacing: "east",
-  faceAngles: [0, 0, 0, 0],
+  faceAngles: [-90, 0, 90, 180],
   draw(drawArgs) {
-    if (drawArgs.theme.library?.NAND) {
-      drawArgs.theme.library.NAND(drawArgs);
+    if (drawArgs.theme.library?.XOR) {
+      drawArgs.theme.library.XOR(drawArgs);
       return;
     }
 
-    const { bounds, ctx, theme, scaleFactor = 1 } = drawArgs;
+    const {
+      bounds,
+      ctx,
+      theme,
+      scaleFactor = 1,
+      assets,
+      faceAngles,
+    } = drawArgs;
+
+    ctx.save();
+
+    const angle = faceAngles[toFaceIndex(drawArgs.face)] + 90;
+
+    const rad = (angle * Math.PI) / 180;
 
     const [loc, dim] = bounds;
 
@@ -41,13 +58,15 @@ export const nandComponentDefinition = {
       resolveCn(width, scaleFactor),
       resolveCn(height, scaleFactor)
     );
+
+    ctx.restore();
   },
 
   onSignalChange(signal) {
     const [a, b] = signal;
 
-    const result = a === 1 && b === 1 ? 0 : 1;
+    const result = a === 1 || b === 1 ? 0 : 1;
 
     return [a, b, result];
   },
-} satisfies ComponentDefinition<NandState>;
+} satisfies ComponentDefinition<NorState>;

@@ -1,5 +1,7 @@
 import { andComponentDefinition } from "src/components/AND";
+import { adderComponentDefinition } from "src/components/Adder";
 import { nandComponentDefinition } from "src/components/NAND";
+import { norComponentDefinition } from "src/components/NOR";
 import { notComponentDefinition } from "src/components/NOT";
 import { orComponentDefinition } from "src/components/OR";
 import { xorComponentDefinition } from "src/components/XOR";
@@ -183,6 +185,8 @@ const Library = {
   "NAND Gate": nandComponentDefinition,
   "OR Gate": orComponentDefinition,
   "XOR Gate": xorComponentDefinition,
+  "NOR Gate": norComponentDefinition,
+  Adder: adderComponentDefinition,
 };
 
 export const parseCircuit = async (root: Element) => {
