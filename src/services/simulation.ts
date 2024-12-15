@@ -32,7 +32,55 @@ class SimulationEngine {
   connectWires(wires: Component<WireState>[]) {
     this.wires.push(...wires);
 
-    const wireSignals = wires.map(() => ElectricSignal.LOW);
+    const wireSignals = wires.map((w) => {
+      const fromX = w.state.from[0] / this.gridSize;
+      const fromY = w.state.from[1] / this.gridSize;
+      const toX = w.state.to[0] / this.gridSize;
+      const toY = w.state.to[1] / this.gridSize;
+
+      const fromPorts = this.getComponentPortAt(fromX, fromY);
+
+      const toPorts = this.getComponentPortAt(toX, toY);
+
+      if (fromPorts.length === 0 && toPorts.length === 0) {
+        return ElectricSignal.LOW;
+      }
+
+      const computedSignal = ElectricSignal.LOW;
+
+      const limit = Math.max(fromPorts.length, toPorts.length);
+
+      for (let i = 0; i < limit; i++) {
+        const fromPort = fromPorts[i];
+        const toPort = toPorts[i];
+
+        const fromSignal = fromPort
+          ? this.portsSignals[fromPort[0]][fromPort[1]]
+          : ElectricSignal.LOW;
+
+        const toSinal = toPort
+          ? this.portsSignals[toPort[0]][toPort[1]]
+          : ElectricSignal.LOW;
+
+        if (fromSignal !== toSinal) {
+          if (fromSignal === ElectricSignal.HIGH) {
+            this.propagateSignal(toX, toY, ElectricSignal.HIGH);
+          } else {
+            this.propagateSignal(toX, toY, ElectricSignal.LOW);
+          }
+        }
+      }
+
+      console.log(
+        fromPorts.map(([x, y]) => this.portsSignals[x][y]),
+        toPorts.map(([x, y]) => this.portsSignals[x][y])
+      );
+      // console.log(this.getComponentPortAt(w.state.to[0], w.state.to[1]));
+
+      return ElectricSignal.LOW;
+    });
+
+    console.log(this.portsMap);
 
     this.wireSignals.push(...wireSignals);
   }
@@ -68,10 +116,10 @@ class SimulationEngine {
       const [x2, y2] = wire.state.to;
 
       return (
-        x >= resolveCn(x1) / this.gridSize &&
-        x <= resolveCn(x2) / this.gridSize &&
-        y >= resolveCn(y1) / this.gridSize &&
-        y <= resolveCn(y2) / this.gridSize
+        x >= x1 / this.gridSize &&
+        x <= x2 / this.gridSize &&
+        y >= y1 / this.gridSize &&
+        y <= y2 / this.gridSize
       );
     });
   }

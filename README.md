@@ -185,4 +185,5 @@ load the assets in the way you like and then overload the skin functions from yo
 my plan is to provide a nice API to render the components with much of hassle and boilerplate. but for now, this is the way to do it.
 
 ## Example
+
 [![Screen Recording 2024-12-15 at 9 56 35 AM](https://github.com/user-attachments/assets/6ae10d7f-2220-4de2-86db-4a5747b8744b)](https://jeffersonmourak.com/blog/the-binary)

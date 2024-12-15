@@ -5,7 +5,7 @@ import { type Component, parseCircuit } from "./services/parser";
 import type SimulationEngine from "./services/simulation";
 import type { ElectricSignal } from "./services/simulation";
 import { type CnMat2x2, resolveCn } from "./utils";
-import { pt } from "./utils/renderPoints";
+import { pt, toFaceIndex } from "./utils/renderPoints";
 import type { CircTheme } from "./utils/theme";
 
 export interface RenderContext {
@@ -52,11 +52,10 @@ function renderComponentPorts<S>(
     );
 
     ctx.beginPath();
-    ctx.arc(rotatedPortX, rotatedPortY, 1.3 * scaleFactor, 0, 2 * Math.PI);
+    ctx.arc(rotatedPortX, rotatedPortY, 2.5 * scaleFactor, 0, 2 * Math.PI);
     ctx.fillStyle = signal === 0 ? theme.colors.base35 : theme.colors.orange;
     ctx.fill();
     ctx.closePath();
-    // ctx.fillRect(rotatedPortX - 2.5, rotatedPortY - 2.5, 5, 5);
   }
 }
 
@@ -77,8 +76,8 @@ export function buildCanvas(
 
     const [wires, components] = partition(circuit, (c) => c.name === "wire");
 
-    simulation.connectWires(wires);
     simulation.connectPorts(components);
+    simulation.connectWires(wires);
 
     function processPointerAction(collidingComponents: Set<number>) {
       for (const index of collidingComponents) {
@@ -108,7 +107,9 @@ export function buildCanvas(
           throw new Error("Could not get 2d context");
         }
 
-        ctx.translate(10, 10);
+        ctx.save();
+        ctx.scale(context.size, context.size);
+        ctx.translate(-simulation.gridSize, -simulation.gridSize / 2);
 
         // Draw background
         ctx.fillStyle = options.theme.colors.backgroundPrimary;
@@ -118,17 +119,16 @@ export function buildCanvas(
         ctx.fillStyle = options.theme.colors.blue;
 
         for (
-          let x = 0;
+          let x = simulation.gridSize;
           x < canvas.width;
-          x += context.size * simulation.gridSize
+          x += simulation.gridSize
         ) {
-          for (
-            let y = 0;
-            y < canvas.height;
-            y += context.size * simulation.gridSize
-          ) {
+          for (let y = 0; y < canvas.height; y += simulation.gridSize) {
+            if (y === 0 || x === 0) {
+              continue;
+            }
             ctx.beginPath();
-            ctx.arc(x, y, (1 / 2) * options.scale, 0, 2 * Math.PI);
+            ctx.arc(x, y, 1, 0, 2 * Math.PI);
             ctx.fill();
           }
         }
@@ -136,7 +136,7 @@ export function buildCanvas(
         for (let i = 0; i < wires.length; i++) {
           const wire = wires[i];
           const signal = simulation.wireSignals[i];
-
+ 
           wire.draw({
             ctx,
             theme: options.theme,
@@ -144,7 +144,7 @@ export function buildCanvas(
             pointerLocation: null,
             bounds: wire.bounds,
             face: wire.facing,
-            scaleFactor: context.size,
+            scaleFactor: 1,
             ports: wire.ports,
             faceAngles: wire.faceAngles,
             portsSignals: [signal],
@@ -159,46 +159,54 @@ export function buildCanvas(
           const coliding = checkPointerCollision(
             context.pointerLocation,
             component.bounds,
-            context.size
+            options.scale
           );
 
           if (coliding) {
             collidingComponents.add(i);
           }
 
+          ctx.save();
+
+          ctx.translate(component.bounds[0][0], component.bounds[0][1]);
+
+          const angle =
+            component.faceAngles[toFaceIndex(component.facing)] + 90;
+
+          const [cW, cH] = component.bounds[1];
+
+          const rad = (angle * Math.PI) / 180;
+          ctx.translate(cW / 2, cH / 2);
+          ctx.rotate(rad);
+          ctx.translate(-cW / 2, -cH / 2);
           component.draw({
             ctx,
             theme: options.theme,
             state: component.state,
             pointerLocation: coliding ? context.pointerLocation ?? null : null,
-            bounds: component.bounds,
+            bounds: [[0, 0], component.bounds[1]],
             face: component.facing,
-            scaleFactor: context.size,
+            scaleFactor: 1,
             ports: component.ports,
             portsSignals,
             faceAngles: component.faceAngles,
             assets: component.assets,
           });
+          ctx.restore();
         }
 
         for (let i = 0; i < components.length; i++) {
           const component = components[i];
           const portsSignals = simulation.portsSignals[i];
-          renderComponentPorts(
-            ctx,
-            component,
-            context.size,
-            portsSignals,
-            options.theme
-          );
+          renderComponentPorts(ctx, component, 1, portsSignals, options.theme);
         }
 
         if (context.pointerLocation) {
           ctx.beginPath();
           ctx.arc(
-            context.pointerLocation[0],
-            context.pointerLocation[1],
-            4,
+            context.pointerLocation[0] / options.scale,
+            context.pointerLocation[1] / options.scale,
+            2,
             0,
             2 * Math.PI
           );
@@ -212,7 +220,7 @@ export function buildCanvas(
         }
         canvas.style.cursor = "none";
 
-        ctx.translate(-10, -10);
+        ctx.restore();
       },
       update: ({ context }) => {
         context.pointerLocation = interaction.getPointerLocation();
