@@ -1,5 +1,5 @@
-import type { WireState } from "src/components/wire";
-import { resolveCn } from "src/utils";
+import type { WireState } from "../components/wire";
+import { resolveCn } from "../utils";
 import { type Component, type PortMode, parseCircuitPorts } from "./parser";
 
 export enum ElectricSignal {

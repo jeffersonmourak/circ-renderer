@@ -1,6 +1,5 @@
-import { cn, resolveCn } from "src/utils";
-import { toFaceIndex } from "src/utils/renderPoints";
 import type { ComponentDefinition } from "../services/parser";
+import { cn } from "../utils";
 
 export type XorState = {
   size: number;
@@ -24,42 +23,10 @@ export const xorComponentDefinition = {
   ],
   defaultFacing: "east",
   faceAngles: [-90, 0, 90, 180],
-  draw(drawArgs) {
-    if (drawArgs.theme.library?.XOR) {
-      drawArgs.theme.library.XOR(drawArgs);
-      return;
-    }
-
-    const {
-      bounds,
-      ctx,
-      theme,
-      scaleFactor = 1,
-      assets,
-      faceAngles,
-    } = drawArgs;
-
-    ctx.save();
-
-    const angle = faceAngles[toFaceIndex(drawArgs.face)] + 90;
-
-    const rad = (angle * Math.PI) / 180;
-
-    const [loc, dim] = bounds;
-
-    const [ogX, ogY] = loc;
-    const [width, height] = dim;
-
+  draw({ dimensions: [width, height], ctx, theme }) {
     ctx.fillStyle = theme.colors.pink;
 
-    ctx.fillRect(
-      resolveCn(ogX, scaleFactor),
-      resolveCn(ogY, scaleFactor),
-      resolveCn(width, scaleFactor),
-      resolveCn(height, scaleFactor)
-    );
-
-    ctx.restore();
+    ctx.fillRect(0, 0, width, height);
   },
 
   onSignalChange(signal) {

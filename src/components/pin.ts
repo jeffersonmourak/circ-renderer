@@ -1,5 +1,5 @@
-import { cn, resolveCn } from "src/utils";
 import type { ComponentDefinition } from "../services/parser";
+import { cn } from "../utils";
 
 export type PinState = {
   output: boolean;
@@ -16,38 +16,14 @@ export const pinComponentDefinition = {
   ports: ({ output }) => [[cn(5), cn(0), output ? "input" : "output"]],
   defaultFacing: "east",
   faceAngles: [270, 0, 90, 180],
-  draw(drawArgs) {
-    if (drawArgs.theme.library?.pin) {
-      drawArgs.theme.library.pin(drawArgs);
-      return;
-    }
-
-    const {
-      bounds,
-      ctx,
-      theme,
-      state,
-      pointerLocation,
-      scaleFactor = 1,
-    } = drawArgs;
-
-    const [loc, dim] = bounds;
-
-    const [ogX, ogY] = loc;
-    const [width, height] = dim;
-
+  draw({ dimensions: [width, height], ctx, theme, state, pointerLocation }) {
     ctx.fillStyle = state.output
       ? "blue"
       : pointerLocation !== null
       ? theme.colors.yellow
       : "green";
 
-    ctx.fillRect(
-      resolveCn(ogX, scaleFactor),
-      resolveCn(ogY, scaleFactor),
-      resolveCn(width, scaleFactor),
-      resolveCn(height, scaleFactor)
-    );
+    ctx.fillRect(0, 0, width, height);
   },
   onPress(signal) {
     return [signal[0] === 0 ? 1 : 0];

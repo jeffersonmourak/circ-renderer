@@ -95,64 +95,44 @@ const colors = {
 
 The skin instructions are simple functions that recives a set of parameters and renders the draw instructions of the component in the canvas.
 
-> This is still in development, so the API may change in the future. i'm experimenting with different ways to implement this, but the idea is to have enable the skin maker to draw instructions like a 0,0 canvas position and rotation independend.
+> This is still in development, so the API may change in the future. i'm experimenting with different ways to implement.
 
 > **Note:** The Skin does not render the component ports, this is done by the renderer.
 
 ```typescript
 import {
-  type AndState, // params from the file.
+  type NotState, // params from the file.
   type DrawArguments, // arguments used for rendering in canvas, theme information, assets, and component location information.
-  resolveCn, // <- helper function to resolve a circuit number to a canvas number (scale factor)
 } from "circ-renderer";
+
 // Example of a skin instruction
-const AndSkin = ({
-  bounds,
+const NotSkin = ({
+  dimensions,
   ctx,
   theme,
-  scaleFactor = 1,
-  state,
-  faceAngles,
-  face,
   assets,
-}: DrawArguments<AndState>) => {
-  ctx.save(); // <- Important to not mess with the canvas state.
-  const [loc, dim] = bounds;
+}: DrawArguments<NotState>) => {
+  const [width, height] = dimensions;
 
-  const [ogX, ogY] = loc;
-  const [width, height] = dim;
-
-  const angle = faceAngles[toFaceIndex(face)] + 90;
-
-  const rad = (angle * Math.PI) / 180;
-
-  ctx.translate(
-    resolveCn(ogX, scaleFactor) + resolveCn(width, scaleFactor) / 2,
-    resolveCn(ogY, scaleFactor) + resolveCn(height, scaleFactor) / 2
-  );
-
-  ctx.rotate(rad);
-
-  const w = resolveCn(width, scaleFactor);
-  const h = resolveCn(height, scaleFactor);
-
-  ctx.drawImage(assets.AND, w / -2, h / -2, w, h); // <- using an asset to render the component [try not to use, read more below]
-  ctx.rotate(-rad);
+  ctx.drawImage(assets.NOT, 0, -height / 2, width, height * 2);
 
   ctx.beginPath();
-  ctx.font = `${6 * scaleFactor}px monospace`;
+  ctx.font = `${6}px monospace`;
 
-  ctx.fillStyle = theme.colors.base00; // <- using the base as text color this is *NOT* a standard.
+  ctx.fillStyle = theme.colors.base00;
   ctx.strokeStyle = theme.colors.base70;
-  ctx.lineWidth = 0.5 * scaleFactor;
+  ctx.lineWidth = 0.5;
   ctx.textAlign = "center";
   ctx.fill();
 
-  ctx.strokeText("AND", 0, 2 * scaleFactor);
+  ctx.save();
+  ctx.translate(width / 2, height);
+  ctx.rotate(-Math.PI / 2);
 
-  ctx.fillText("AND", 0, 2 * scaleFactor);
+  ctx.strokeText("NOT", 5, -5);
 
-  ctx.restore(); // Important to restore unless you want a labirinthtic canvas or psychedelic circuit, which is cool too. but not the goal.
+  ctx.fillText("NOT", 5, -5);
+  ctx.restore();
 };
 ```
 

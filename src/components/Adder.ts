@@ -1,5 +1,5 @@
-import { cn, resolveCn } from "src/utils";
 import type { ComponentDefinition } from "../services/parser";
+import { cn } from "../utils";
 
 export type AdderState = {
   size: number;
@@ -20,27 +20,11 @@ export const adderComponentDefinition = {
   ],
   defaultFacing: "east",
   faceAngles: [0, 0, 0, 0],
-  draw(drawArgs) {
-    if (drawArgs.theme.library?.NAND) {
-      drawArgs.theme.library.NAND(drawArgs);
-      return;
-    }
-
-    const { bounds, ctx, theme, scaleFactor = 1 } = drawArgs;
-
-    const [loc, dim] = bounds;
-
-    const [ogX, ogY] = loc;
-    const [width, height] = dim;
+  draw({ dimensions, ctx, theme }) {
+    const [width, height] = dimensions;
 
     ctx.fillStyle = theme.colors.pink;
-
-    ctx.fillRect(
-      resolveCn(ogX, scaleFactor),
-      resolveCn(ogY, scaleFactor),
-      resolveCn(width, scaleFactor),
-      resolveCn(height, scaleFactor)
-    );
+    ctx.fillRect(0, 0, width, height);
   },
 
   onSignalChange(signal) {

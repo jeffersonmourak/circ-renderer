@@ -1,25 +1,15 @@
-import { andComponentDefinition } from "src/components/AND";
-import { adderComponentDefinition } from "src/components/Adder";
-import { nandComponentDefinition } from "src/components/NAND";
-import { norComponentDefinition } from "src/components/NOR";
-import { notComponentDefinition } from "src/components/NOT";
-import { orComponentDefinition } from "src/components/OR";
-import { xorComponentDefinition } from "src/components/XOR";
+import { adderComponentDefinition, andComponentDefinition, ledComponentDefinition, nandComponentDefinition, norComponentDefinition, notComponentDefinition, orComponentDefinition, pinComponentDefinition, wireComponentDefinition, xorComponentDefinition } from "../components";
 import {
-  type CircTheme,
-  type CnMat2x2,
-  type ComponentFace,
-  type ComputableNumber,
-  type Mat2x2,
-  type Vector2,
-  cn,
-  decodeCircCoords,
-  resolveCn,
-} from "src/utils";
-import { pt } from "src/utils/renderPoints";
-import { ledComponentDefinition } from "../components/LED";
-import { pinComponentDefinition } from "../components/pin";
-import { wireComponentDefinition } from "../components/wire";
+	type CircTheme,
+	type ComponentFace,
+	type ComputableNumber,
+	type Mat2x2,
+	type Vector2,
+	cn,
+	decodeCircCoords,
+	resolveCn
+} from "../utils";
+import { pt } from "../utils/renderPoints";
 import type { ElectricSignal } from "./simulation";
 
 export type ComponentState = {
@@ -29,11 +19,10 @@ export type ComponentState = {
 };
 
 export type DrawArguments<S> = {
-	scaleFactor?: number;
 	ctx: CanvasRenderingContext2D;
 	theme: CircTheme;
 	state: S;
-	bounds: CnMat2x2;
+  dimensions: Vector2;
 	face: ComponentFace;
 	pointerLocation: [number, number] | null;
 	faceAngles: [number, number, number, number];
@@ -80,7 +69,7 @@ export type Component<S> = {
 	assets: Record<string, HTMLImageElement>;
 };
 
-export const getFacingOffset = (facing: ComponentFace) => {
+export const getDirectionFacingOffset = (facing: ComponentFace) => {
 	switch (facing) {
 		case "north":
 			return [cn((size) => -1 * (size / 2)), 0];
@@ -145,7 +134,7 @@ export const parseComponent = async <S>(
 		}
 	}
 
-	const directionOffsets = getFacingOffset(facing);
+	const directionOffsets = getDirectionFacingOffset(facing);
 	const state = parse(values, component);
 
 	const ogX = location[0];

@@ -1,11 +1,18 @@
 {
   "name": "circ-renderer",
-  "version": "1.0.11",
+  "version": "1.1.0",
   "description": "\"Logisim Circ file render and pseudo-simulator.",
-  "main": "main.js",
+  "main": "./lib",
+  "files": [
+    "./lib/**/*"
+  ],
   "scripts": {
-    "dev": "node esbuild.dev.config.mjs",
-    "build": "node esbuild.config.mjs production"
+    "clean": "rm -rf ./lib/",
+    "build": "npx -p typescript tsc --project tsconfig.json",
+    "dev": "npx -p typescript tsc --project tsconfig.json --watch",
+    "typecheck": "tsc --noEmit",
+    "old:build": "node esbuild.config.mjs production",
+    "old:dev": "node esbuild.dev.config.mjs"
   },
   "repository": {
     "type": "git",
@@ -27,7 +34,7 @@
     "obsidian": "latest",
     "obsidian-typings": "^2.3.4",
     "tslib": "2.4.0",
-    "typescript": "4.7.4"
+    "typescript": "^5.6.3"
   },
   "dependencies": {
     "@codemirror/language": "^6.10.6",

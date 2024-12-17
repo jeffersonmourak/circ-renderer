@@ -1,4 +1,3 @@
-import builtins from "builtin-modules";
 import esbuild from "esbuild";
 import process from "node:process";
 
@@ -17,8 +16,7 @@ const context = await esbuild.context({
 	},
 	entryPoints: ["main.ts"],
 	bundle: true,
-	external: [
-		...builtins],
+	external: [...builtins],
 	format: "esm",
 	target: "es2018",
 	logLevel: "info",

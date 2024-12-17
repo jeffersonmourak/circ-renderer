@@ -1,4 +1,4 @@
-import type { DrawArguments } from "src/services/parser";
+import type { DrawArguments } from "../services/parser";
 
 const baseThemeColors = {
 	primary: "#007bff",
