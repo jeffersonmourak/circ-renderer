@@ -1,242 +1,268 @@
-import { adderComponentDefinition, andComponentDefinition, ledComponentDefinition, nandComponentDefinition, norComponentDefinition, notComponentDefinition, orComponentDefinition, pinComponentDefinition, wireComponentDefinition, xorComponentDefinition } from "../components";
 import {
-	type CircTheme,
-	type ComponentFace,
-	type ComputableNumber,
-	type Mat2x2,
-	type Vector2,
-	cn,
-	decodeCircCoords,
-	resolveCn
+  adderComponentDefinition,
+  andComponentDefinition,
+  ledComponentDefinition,
+  nandComponentDefinition,
+  norComponentDefinition,
+  notComponentDefinition,
+  orComponentDefinition,
+  pinComponentDefinition,
+  wireComponentDefinition,
+  xorComponentDefinition,
+} from "../components";
+import {
+  type CircTheme,
+  type ComponentFace,
+  type ComputableNumber,
+  type Mat2x2,
+  type Vector2,
+  cn,
+  decodeCircCoords,
+  resolveCn,
 } from "../utils";
 import { pt } from "../utils/renderPoints";
+import type { LoadedCircuit } from "./loader";
 import type { ElectricSignal } from "./simulation";
 
 export type ComponentState = {
-	location: [number, number];
-	dimensions: [number, number];
-	face: ComponentFace;
+  location: [number, number];
+  dimensions: [number, number];
+  face: ComponentFace;
 };
 
 export type DrawArguments<S> = {
-	ctx: CanvasRenderingContext2D;
-	theme: CircTheme;
-	state: S;
+  ctx: CanvasRenderingContext2D;
+  theme: CircTheme;
+  state: S;
   dimensions: Vector2;
-	face: ComponentFace;
-	pointerLocation: [number, number] | null;
-	faceAngles: [number, number, number, number];
-	ports: Port[];
-	portsSignals: ElectricSignal[];
-	assets: Record<string, HTMLImageElement>;
+  face: ComponentFace;
+  pointerLocation: [number, number] | null;
+  faceAngles: [number, number, number, number];
+  ports: Port[];
+  portsSignals: ElectricSignal[];
 };
 
 export type PortMode = "input" | "output";
 
-type Port = [ComputableNumber, ComputableNumber, PortMode];
+export type Port = [ComputableNumber, ComputableNumber, PortMode];
 
 export type ComponentDefinition<S> = {
-	name: string;
-	parse: (values: Record<string, string | null>, component: Element) => S;
-	dimensions: ((state: S) => Vector2) | Vector2;
-	draw(args: DrawArguments<S>): void;
-	onSignalChange: (
-		ports: ElectricSignal[],
-		changedPort: number,
-	) => ElectricSignal[];
-	onPress?(ports: ElectricSignal[]): ElectricSignal[];
-	isInteractable?: boolean;
-	defaultFacing: ComponentFace;
-	faceAngles: [number, number, number, number];
-	skipLocationCheck?: boolean;
-	ports: Port[] | ((state: S) => Port[]);
-	loadAssets?: () => Promise<Record<string, HTMLImageElement>>;
+  name: string;
+  parse: (values: Record<string, string | null>, component: Element) => S;
+  dimensions: ((state: S) => Vector2) | Vector2;
+  draw(args: DrawArguments<S>): void;
+  onSignalChange: (
+    ports: ElectricSignal[],
+    changedPort: number,
+    state: S
+  ) => ElectricSignal[];
+  onPress?(ports: ElectricSignal[], state: S): ElectricSignal[];
+  isInteractable?: boolean;
+  defaultFacing: ComponentFace;
+  faceAngles: [number, number, number, number];
+  skipLocationCheck?: boolean;
+  ports: Port[] | ((state: S) => Port[]);
 };
 
 export type Component<S> = {
-	name: string;
-	state: S;
-	facing: ComponentFace;
-	draw(args: DrawArguments<S>): void;
-	bounds: Mat2x2;
-	onPress?(ports: ElectricSignal[]): ElectricSignal[];
-	onSignalChange: (
-		ports: ElectricSignal[],
-		changedPort: number,
-	) => ElectricSignal[];
-	faceAngles: [number, number, number, number];
-	ports: Port[];
-	assets: Record<string, HTMLImageElement>;
+  name: string;
+  state: S;
+  facing: ComponentFace;
+  draw(args: DrawArguments<S>): void;
+  bounds: Mat2x2;
+  onPress?(ports: ElectricSignal[], state: S): ElectricSignal[];
+  onSignalChange: (
+    ports: ElectricSignal[],
+    changedPort: number,
+    state: S
+  ) => ElectricSignal[];
+  faceAngles: [number, number, number, number];
+  ports: Port[];
 };
 
 export const getDirectionFacingOffset = (facing: ComponentFace) => {
-	switch (facing) {
-		case "north":
-			return [cn((size) => -1 * (size / 2)), 0];
-		case "south":
-			return [cn((size) => -1 * (size / 2)), cn((size) => -2 * (size / 2))];
-		case "east":
-			return [cn((size) => -2 * (size / 2)), cn((size) => -1 * (size / 2))];
-		case "west":
-			return [cn((size) => 0 * (size / 2)), cn((size) => -1 * (size / 2))];
-	}
+  switch (facing) {
+    case "north":
+      return [cn((size) => -1 * (size / 2)), 0];
+    case "south":
+      return [cn((size) => -1 * (size / 2)), cn((size) => -2 * (size / 2))];
+    case "east":
+      return [cn((size) => -2 * (size / 2)), cn((size) => -1 * (size / 2))];
+    case "west":
+      return [cn((size) => 0 * (size / 2)), cn((size) => -1 * (size / 2))];
+  }
 };
 
-export const parseComponent = async <S>(
-	component: Element,
-	{
-		parse,
-		dimensions,
-		defaultFacing = "east",
-		isInteractable = false,
-		skipLocationCheck = false,
-		ports,
-		...defs
-	}: ComponentDefinition<S>,
-): Promise<Component<S>> => {
-	const locationAttribute = component.getAttribute("loc");
+export const parseComponent = <S>(
+  component: Element,
+  {
+    parse,
+    dimensions,
+    defaultFacing = "east",
+    isInteractable = false,
+    skipLocationCheck = false,
+    ports,
+    ...defs
+  }: ComponentDefinition<S>,
+  circuitType: "primitive" | "integrated" = "primitive"
+): Component<S> => {
+  const locationAttribute = component.getAttribute("loc");
 
-	if (!skipLocationCheck && !locationAttribute) {
-		throw new Error("Component is missing a location attribute");
-	}
+  if (!skipLocationCheck && !locationAttribute) {
+    throw new Error("Component is missing a location attribute");
+  }
 
-	const location: Vector2 =
-		!locationAttribute || skipLocationCheck
-			? [0, 0]
-			: decodeCircCoords(locationAttribute);
+  const location: Vector2 =
+    !locationAttribute || skipLocationCheck
+      ? [0, 0]
+      : decodeCircCoords(locationAttribute);
 
-	let facing = defaultFacing;
+  let facing = defaultFacing;
 
-	const values: Record<string, string | null> = {};
+  const values: Record<string, string | null> = {};
 
-	for (let i = 0; i < component.children.length; i++) {
-		const attribute = component.children[i];
-		const name = attribute.getAttribute("name");
+  for (let i = 0; i < component.children.length; i++) {
+    const attribute = component.children[i];
+    const name = attribute.getAttribute("name");
 
-		if (!name) {
-			continue;
-		}
+    if (!name) {
+      continue;
+    }
 
-		switch (name) {
-			case "facing": {
-				const value = attribute.getAttribute("val");
+    switch (name) {
+      case "facing": {
+        const value = attribute.getAttribute("val");
 
-				if (!value) {
-					continue;
-				}
+        if (!value) {
+          continue;
+        }
 
-				facing = value as ComponentFace;
-				break;
-			}
-			default: {
-				values[name] = attribute.getAttribute("val");
-			}
-		}
-	}
+        facing = value as ComponentFace;
+        break;
+      }
+      default: {
+        values[name] = attribute.getAttribute("val");
+      }
+    }
+  }
 
-	const directionOffsets = getDirectionFacingOffset(facing);
-	const state = parse(values, component);
+  const directionOffsets = getDirectionFacingOffset(facing);
+  const state = parse(values, component);
 
-	const ogX = location[0];
-	const ogY = location[1];
+  const ogX = location[0];
+  // ?? idk why this is happening, but it's a hack to fix it
+  const ogY = location[1] + (circuitType === "integrated" ? 5 : 0);
 
-	const dimensionValues = Array.isArray(dimensions)
-		? dimensions
-		: dimensions(state);
+  const dimensionValues = Array.isArray(dimensions)
+    ? dimensions
+    : dimensions(state);
 
-	const width = dimensionValues[0];
-	const height = dimensionValues[1];
+  const width = dimensionValues[0];
+  const height = dimensionValues[1];
 
-	const offsetX = resolveCn(directionOffsets[0], width);
-	const offsetY = resolveCn(directionOffsets[1], height);
+  const offsetX = resolveCn(directionOffsets[0], width);
+  const offsetY = resolveCn(directionOffsets[1], height);
 
-	const normalizedLocation = [ogX + offsetX, ogY + offsetY] satisfies Vector2;
+  const normalizedLocation = [ogX + offsetX, ogY + offsetY] satisfies Vector2;
 
-	const assets = defs.loadAssets ? await defs.loadAssets() : {};
-
-	return {
-		state,
-		facing,
-		assets,
-		ports: Array.isArray(ports) ? ports : ports(state),
-		bounds: [normalizedLocation, dimensionValues],
-		...defs,
-	};
+  return {
+    state: state,
+    facing,
+    ports: Array.isArray(ports) ? ports : ports(state),
+    bounds: [normalizedLocation, dimensionValues],
+    onPress: defs.onPress,
+    ...defs,
+  } satisfies Component<S>;
 };
 
 const Library = {
-	Pin: pinComponentDefinition,
-	LED: ledComponentDefinition,
-	"NOT Gate": notComponentDefinition,
-	"AND Gate": andComponentDefinition,
-	"NAND Gate": nandComponentDefinition,
-	"OR Gate": orComponentDefinition,
-	"XOR Gate": xorComponentDefinition,
-	"NOR Gate": norComponentDefinition,
-	Adder: adderComponentDefinition,
+  Pin: pinComponentDefinition,
+  LED: ledComponentDefinition,
+  "NOT Gate": notComponentDefinition,
+  "AND Gate": andComponentDefinition,
+  "NAND Gate": nandComponentDefinition,
+  "OR Gate": orComponentDefinition,
+  "XOR Gate": xorComponentDefinition,
+  "NOR Gate": norComponentDefinition,
+  Adder: adderComponentDefinition,
 };
 
-export const parseCircuit = async (root: Element) => {
-	// biome-ignore lint/suspicious/noExplicitAny: This is a hack to get around the type system
-	const parsedComponents: Component<any>[] = [];
+export const parseCircuit = (
+  circuitsMap: Record<string, LoadedCircuit>,
+  target = "main"
+) => {
+  // biome-ignore lint/suspicious/noExplicitAny: This is a hack to get around the type system
+  const parsedComponents: Component<any>[] = [];
+  const root = circuitsMap[target].component;
 
-	for (let i = 0; i < root.children.length; i++) {
-		const component = root.children[i];
+  if (!root) {
+    return;
+  }
 
-		const type = component.tagName;
-		const name = component.getAttribute("name");
+  for (let i = 0; i < root.children.length; i++) {
+    const component = root.children[i];
 
-		// Ignore attribute nodes for now!
-		if (type === "a") {
-			continue;
-		}
+    const type = component.tagName;
+    const name = component.getAttribute("name");
 
-		if (type === "wire") {
-			parsedComponents.push(
-				await parseComponent(component, wireComponentDefinition),
-			);
-			continue;
-		}
+    // Ignore attribute nodes for now!
+    if (type === "a") {
+      continue;
+    }
 
-		if (!name) {
-			continue;
-		}
+    if (type === "wire") {
+      parsedComponents.push(parseComponent(component, wireComponentDefinition));
+      continue;
+    }
 
-		const libraryComponent = Library[name as keyof typeof Library];
+    if (!name) {
+      continue;
+    }
 
-		if (!libraryComponent) {
-			console.log(`Unknown component type: ${name}`);
-			continue;
-		}
+    const circuitType = Library[name as keyof typeof Library]
+      ? "primitive"
+      : "integrated";
 
-		// @ts-expect-error - This is a hack to get around the type system
-		const parsedComponent = await parseComponent(component, libraryComponent);
+    const libraryComponent =
+      Library[name as keyof typeof Library] ?? circuitsMap[name]?.definition;
 
-		parsedComponents.push(parsedComponent);
-	}
+    if (!libraryComponent) {
+      console.log(`Unknown component type: ${name}`);
+      continue;
+    }
 
-	return parsedComponents;
+    const parsedComponent = parseComponent(
+      component,
+      // @ts-expect-error - This is a hack to get around the type system
+      libraryComponent,
+      circuitType
+    );
+
+    parsedComponents.push(parsedComponent);
+  }
+
+  return parsedComponents;
 };
 
 export const parseCircuitPorts = <S>(
-	component: Component<S>,
-	gridSize: number,
+  component: Component<S>,
+  gridSize: number
 ) => {
-	const portData: [number, number, PortMode][] = [];
-	for (const port of component.ports) {
-		const [x, y, mode] = port;
-		const [resolvedX, resolvedY] = [resolveCn(x), resolveCn(y)];
-		const [rotatedPortX, rotatedPortY] = pt(
-			resolvedX,
-			resolvedY,
-			component.bounds,
-			component.facing,
-			component.faceAngles,
-			1,
-		);
+  const portData: [number, number, PortMode][] = [];
+  for (const port of component.ports) {
+    const [x, y, mode] = port;
+    const [resolvedX, resolvedY] = [resolveCn(x), resolveCn(y)];
+    const [rotatedPortX, rotatedPortY] = pt(
+      resolvedX,
+      resolvedY,
+      component.bounds,
+      component.facing,
+      component.faceAngles,
+      1
+    );
 
-		portData.push([rotatedPortX / gridSize, rotatedPortY / gridSize, mode]);
-	}
+    portData.push([rotatedPortX / gridSize, rotatedPortY / gridSize, mode]);
+  }
 
-	return portData;
+  return portData;
 };

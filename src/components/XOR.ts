@@ -12,9 +12,6 @@ export const xorComponentDefinition = {
       size: Number.parseInt(values.size ?? "30"),
     };
   },
-  async loadAssets() {
-    return {};
-  },
   dimensions: ({ size }) => [size, size],
   ports: ({ size }) => [
     [cn(-size + 5), cn(-size / 2 + 5), "input"],

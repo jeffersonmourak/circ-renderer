@@ -25,7 +25,11 @@ export const pinComponentDefinition = {
 
     ctx.fillRect(0, 0, width, height);
   },
-  onPress(signal) {
+  onPress(signal, { output }) {
+    if (output) {
+      return signal;
+    }
+    
     return [signal[0] === 0 ? 1 : 0];
   },
   onSignalChange(signal) {

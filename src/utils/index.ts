@@ -1,3 +1,4 @@
+export * from "./assets";
 export * from "./circ";
 export * from "./numbers";
 export * from "./renderPoints";

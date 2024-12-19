@@ -26,7 +26,7 @@ class SimulationEngine {
 
     this.gridMap = new Array(width)
       .fill(0)
-      .map(() => new Array(height).fill("-"));
+      .map(() => new Array(height).fill("."));
   }
 
   connectWires(wires: Component<WireState>[]) {
@@ -71,16 +71,8 @@ class SimulationEngine {
         }
       }
 
-      console.log(
-        fromPorts.map(([x, y]) => this.portsSignals[x][y]),
-        toPorts.map(([x, y]) => this.portsSignals[x][y])
-      );
-      // console.log(this.getComponentPortAt(w.state.to[0], w.state.to[1]));
-
       return ElectricSignal.LOW;
     });
-
-    console.log(this.portsMap);
 
     this.wireSignals.push(...wireSignals);
   }
@@ -92,7 +84,11 @@ class SimulationEngine {
       const portSignals = component.ports.map(() => ElectricSignal.LOW);
       this.components.push(component);
 
-      const computedSignal = component.onSignalChange(portSignals, 0);
+      const computedSignal = component.onSignalChange(
+        portSignals,
+        0,
+        component.state
+      );
 
       this.portsSignals.push(computedSignal);
 
@@ -153,7 +149,7 @@ class SimulationEngine {
       y >= 0 &&
       x < this.width &&
       y < this.height &&
-      this.gridMap[y][x] !== "-"
+      this.gridMap[y][x] !== "."
     );
   }
 
@@ -227,7 +223,8 @@ class SimulationEngine {
       if (hasChanged) {
         const computedSignal = component.onSignalChange(
           wireSignals.flat(),
-          portIndex
+          portIndex,
+          component.state
         );
 
         const hasChanged = portsSignals.some(
@@ -290,7 +287,7 @@ class SimulationEngine {
     return "x";
   }
 
-  drawGrid() {
+  drawGrid(mark: [number, number] | null = null) {
     let gridString = "";
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
@@ -301,7 +298,9 @@ class SimulationEngine {
 
         if (wires.length > 0 && wireDirection !== null) {
           this.gridMap[y][x] =
-            this.wireSignals[this.getWireIndexIntercecting(x, y)[0]].toString();
+            this.wireSignals[
+              this.getWireIndexIntercecting(x, y)[0]
+            ]?.toString() ?? ".";
         }
 
         if (ports.length > 0 && wires.length > 0) {
@@ -310,6 +309,10 @@ class SimulationEngine {
         } else if (ports.length > 0) {
           this.gridMap[y][x] =
             this.getPortMajorityMode(ports) === "input" ? "⊟" : "⊞";
+        }
+
+        if (mark && mark[0] === x && mark[1] === y) {
+          this.gridMap[y][x] = "X";
         }
       }
       gridString += `${this.gridMap[y].join(" ")}\n`;
