@@ -1,6 +1,6 @@
 {
   "name": "circ-renderer",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "\"Logisim Circ file render and pseudo-simulator.",
   "main": "./lib",
   "files": [
