@@ -8,8 +8,8 @@
   ],
   "scripts": {
     "clean": "rm -rf ./lib/",
-    "build": "npx -p typescript tsc --project tsconfig.json",
-    "dev": "npx -p typescript tsc --project tsconfig.json --watch",
+    "build": "bunx tsc --project tsconfig.json",
+    "dev": "bunx tsc --project tsconfig.json --watch",
     "typecheck": "tsc --noEmit",
     "old:build": "node esbuild.config.mjs production",
     "old:dev": "node esbuild.dev.config.mjs"
