@@ -1,27 +1,26 @@
 {
-	"compilerOptions": {
-		"target": "ES6",
-		"module": "NodeNext",
-		"declaration": true,
-		"outDir": "./lib",
-		"strict": true,
-		"esModuleInterop": true,
-		"baseUrl": "./src",
-		"inlineSourceMap": true,
-		"inlineSources": true,
-		"allowJs": true,
-		"noImplicitAny": true,
-		"moduleResolution": "nodenext",
-		"importHelpers": true,
-		"strictNullChecks": true,
-		"lib": [
-			"DOM",
-			"ES5",
-			"ES6",
-			"ES7"
-		],
-	},
-	"include": [
-		"src/**/*.ts"
-	]
+  "compilerOptions": {
+    // Enable latest features
+    "lib": ["ESNext", "DOM"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "allowJs": true,
+
+    // Bundler mode
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false
+  }
 }

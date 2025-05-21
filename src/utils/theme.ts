@@ -1,4 +1,4 @@
-import type { DrawArguments } from "../services/parser";
+import type { ComponentRenderArgument } from "../modules/renderer";
 
 const baseThemeColors = {
   primary: "#007bff",
@@ -62,34 +62,13 @@ export type ThemeColor = (typeof themeColorKeys)[number];
 
 export type CircTheme = {
   colors: Record<ThemeColor, string>;
-  library: Record<string, <S>(args: DrawArguments<S>) => void>;
+  library: Record<string, (args: ComponentRenderArgument) => void>;
 };
 
 export const baseTheme: CircTheme = {
   colors: baseThemeColors,
   library: {},
 };
-
-export function drawFitText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  fontface: string,
-  width: number,
-  x: number,
-  y: number
-) {
-  // start with a large font size
-  let fontsize = 300;
-
-  // lower the font size until the text fits the canvas
-  do {
-    fontsize--;
-    ctx.font = `${fontsize}px ${fontface}`;
-  } while (ctx.measureText(text).width > width);
-
-  // draw the text
-  ctx.fillText(text, x, y);
-}
 
 export function stringToColor(string: string, randomize?: boolean): string {
   let saltedString = string;
