@@ -1,19 +1,10 @@
 {
   "name": "circ-renderer",
-  "version": "1.1.1",
+  "version": "1.2.1",
   "description": "\"Logisim Circ file render and pseudo-simulator.",
-  "main": "./lib",
-  "files": [
-    "./lib/**/*"
-  ],
-  "scripts": {
-    "clean": "rm -rf ./lib/",
-    "build": "bunx tsc --project tsconfig.json",
-    "dev": "bunx tsc --project tsconfig.json --watch",
-    "typecheck": "tsc --noEmit",
-    "old:build": "node esbuild.config.mjs production",
-    "old:dev": "node esbuild.dev.config.mjs"
-  },
+  "main": "src",
+  "module": "src/index.ts",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jeffersonmourak/circ-renderer.git"
@@ -26,15 +17,15 @@
   "homepage": "https://github.com/jeffersonmourak/circ-renderer#readme",
   "devDependencies": {
     "@types/lodash": "^4.17.13",
-    "@types/node": "^16.11.6",
+    "@types/bun": "latest",
     "@typescript-eslint/eslint-plugin": "5.29.0",
     "@typescript-eslint/parser": "5.29.0",
     "builtin-modules": "3.3.0",
-    "esbuild": "0.17.3",
-    "obsidian": "latest",
-    "obsidian-typings": "^2.3.4",
     "tslib": "2.4.0",
     "typescript": "^5.6.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
   },
   "dependencies": {
     "@codemirror/language": "^6.10.6",
