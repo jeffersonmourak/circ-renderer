@@ -1,12 +1,11 @@
-import type { ComponentRenderArgument } from "../modules/renderer";
+import type { Circuit, CircuitComponent } from "..";
+import type {
+  ComponentRenderArgument,
+  RenderContext,
+} from "../modules/renderer";
 
 const baseThemeColors = {
-  primary: "#007bff",
-  primary1: "#007bff",
-  primary2: "#0056b3",
-  backgroundPrimary: "#f8f9fa",
-  backgroundPrimaryAlt: "#f8f9fa",
-  backgroundSecondary: "#f8f9fa",
+  background: "#f8f9fa",
   red: "#dc3545",
   orange: "#fd7e14",
   yellow: "#ffc107",
@@ -15,27 +14,11 @@ const baseThemeColors = {
   blue: "#007bff",
   purple: "#6f42c1",
   pink: "#e83e8c",
-  base00: "#ffffff",
-  base05: "#f8f9fa",
-  base10: "#f1f3f5",
-  base20: "#e9ecef",
-  base25: "#dee2e6",
-  base30: "#ced4da",
-  base35: "#adb5bd",
-  base40: "#868e96",
-  base50: "#495057",
-  base60: "#343a40",
-  base70: "#212529",
-  base100: "#000000",
+  white: "#ffffff",
 } satisfies Record<ThemeColor, string>;
 
 const themeColorKeys = [
-  "primary",
-  "primary1",
-  "primary2",
-  "backgroundPrimary",
-  "backgroundPrimaryAlt",
-  "backgroundSecondary",
+  "background",
   "red",
   "orange",
   "yellow",
@@ -44,28 +27,37 @@ const themeColorKeys = [
   "blue",
   "purple",
   "pink",
-  "base00",
-  "base05",
-  "base10",
-  "base20",
-  "base25",
-  "base30",
-  "base35",
-  "base40",
-  "base50",
-  "base60",
-  "base70",
-  "base100",
+  "white",
 ] as const;
 
 export type ThemeColor = (typeof themeColorKeys)[number];
 
-export type CircTheme = {
-  colors: Record<ThemeColor, string>;
-  library: Record<string, (args: ComponentRenderArgument) => void>;
+export type CircTheme<C extends string> = {
+  colors: Record<C, string>;
+  library: Record<string, (args: ComponentRenderArgument<C>) => void>;
+  background?: (
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    theme: CircTheme<C>,
+    gridSize?: number
+  ) => void;
+  wires?: (
+    ctx: CanvasRenderingContext2D,
+    theme: CircTheme<C>,
+    circuit: Circuit,
+    gridSize?: number
+  ) => void;
+  ports?: (
+    ctx: CanvasRenderingContext2D,
+    theme: CircTheme<C>,
+    component: CircuitComponent,
+    circuit: Circuit,
+    context: RenderContext,
+    gridSize?: number
+  ) => void;
 };
 
-export const baseTheme: CircTheme = {
+export const baseTheme: CircTheme<ThemeColor> = {
   colors: baseThemeColors,
   library: {},
 };

@@ -1,5 +1,6 @@
-import type { CircTheme } from "../utils/theme";
+import { baseTheme, type CircTheme } from "../utils/theme";
 import type { Circuit, CircuitComponent } from "./loader";
+import { circle, line } from "./ui";
 
 export const decodeCircCoords = (
   coords?: string,
@@ -13,18 +14,19 @@ export const decodeCircCoords = (
   return location;
 };
 
-type RenderOptions = {
-  theme: CircTheme;
+type RenderOptions<C extends string> = {
+  theme: CircTheme<C>;
   scale: number;
   width: number;
   height: number;
+  rotate?: number;
   limitFPS?: number;
   onClick?: (context: RenderContext) => void;
 };
 
-export type ComponentRenderArgument = {
+export type ComponentRenderArgument<C extends string> = {
   ctx: CanvasRenderingContext2D;
-  theme: CircTheme;
+  theme: CircTheme<C>;
   component: CircuitComponent;
   dimensions: [number, number];
   pointerLocation: [number, number] | null;
@@ -44,20 +46,19 @@ const DEFAULT_RENDER_CONTEXT: RenderContext = {
   activePin: null,
 };
 
-function renderBackground(
+function defaultBackgroundDrawer<C extends string>(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
-  theme: CircTheme,
-  t: number,
+  theme: CircTheme<C>,
   gridSize = 10
 ) {
-  ctx.save();
-  // Draw background
-  ctx.fillStyle = theme.colors.backgroundPrimary;
+  ctx.fillStyle =
+    (theme as CircTheme<string>).colors.background ??
+    baseTheme.colors.background;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw grid dots
-  ctx.fillStyle = theme.colors.blue;
+  ctx.fillStyle =
+    (theme as CircTheme<string>).colors.blue ?? baseTheme.colors.blue;
 
   for (let x = 0; x < canvas.width; x += gridSize) {
     for (let y = 0; y < canvas.height; y += gridSize) {
@@ -69,18 +70,15 @@ function renderBackground(
       ctx.fill();
     }
   }
-  ctx.restore();
 }
 
-function renderWires(
+function defaultWireDrawer<C extends string>(
   ctx: CanvasRenderingContext2D,
-  theme: CircTheme,
+  theme: CircTheme<C>,
   circuit: Circuit,
   gridSize = 10
 ) {
   const { wires, state } = circuit;
-
-  ctx.save();
 
   for (let i = 0; i < state.length; i++) {
     const groups = wires.connections.get(i);
@@ -100,16 +98,136 @@ function renderWires(
       const y2 = to[1] * gridSize;
       const isOn = state[i] === 1;
 
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.lineWidth = 2;
-      ctx.lineCap = "round";
-      ctx.strokeStyle = isOn ? theme.colors.green : theme.colors.blue;
-      ctx.stroke();
-      ctx.closePath();
+      line({
+        ctx,
+        from: [x1, y1],
+        to: [x2, y2],
+        style: {
+          lineWidth: 2,
+          lineCap: "round",
+          strokeStyle: isOn
+            ? (theme as CircTheme<string>).colors.green ??
+              baseTheme.colors.green
+            : (theme as CircTheme<string>).colors.blue ?? baseTheme.colors.blue,
+        },
+      });
     }
   }
+}
+
+function defaultPortDrawer<C extends string>(
+  ctx: CanvasRenderingContext2D,
+  theme: CircTheme<C>,
+  component: CircuitComponent,
+  circuit: Circuit,
+  _: RenderContext,
+  gridSize = 10
+) {
+  const inputStateAddr = circuit.wireConnections.get(component.location);
+
+  if (inputStateAddr === undefined) {
+    return;
+  }
+
+  const coords = decodeCircCoords(component.location);
+  const inputFillStyle =
+    circuit.state[inputStateAddr] === 1
+      ? (theme as CircTheme<string>).colors.green ?? baseTheme.colors.green
+      : (theme as CircTheme<string>).colors.yellow ?? baseTheme.colors.yellow;
+
+  circle({
+    ctx,
+    center: [coords[0] * gridSize, coords[1] * gridSize],
+    radius: 0.25 * gridSize,
+    style: {
+      fillStyle: inputFillStyle,
+    },
+  });
+
+  for (const port of component.ports) {
+    const portStateAdrr = circuit.wireConnections.get(port);
+    if (portStateAdrr === undefined) {
+      continue;
+    }
+
+    const portLoc = decodeCircCoords(port);
+    const fillStyle =
+      circuit.state[portStateAdrr] === 1
+        ? (theme as CircTheme<string>).colors.green ?? baseTheme.colors.green
+        : (theme as CircTheme<string>).colors.yellow ?? baseTheme.colors.yellow;
+
+    circle({
+      ctx,
+      center: [portLoc[0] * gridSize, portLoc[1] * gridSize],
+      radius: 0.25 * gridSize,
+      style: {
+        fillStyle,
+      },
+    });
+  }
+}
+
+function defaultComponentDrawer<C extends string>({
+  dimensions,
+  ctx,
+  theme,
+  rotationAngle,
+  component,
+}: ComponentRenderArgument<C>) {
+  const [width, height] = dimensions;
+
+  ctx.fillStyle =
+    (theme as CircTheme<string>).colors.white ?? baseTheme.colors.white;
+
+  ctx.save();
+  ctx.translate(-width / 2, height);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillRect(0, height / 2, width, height);
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.font = `${6}px monospace`;
+
+  ctx.fillStyle =
+    (theme as CircTheme<string>).colors.blue ?? baseTheme.colors.blue;
+  ctx.strokeStyle =
+    (theme as CircTheme<string>).colors.blue ?? baseTheme.colors.blue;
+  ctx.lineWidth = 0.5;
+  ctx.textAlign = "center";
+  ctx.fill();
+
+  ctx.translate(width / 2, height / 2);
+  ctx.rotate(-rotationAngle);
+  ctx.strokeText(component.name, -2.5, 2.5);
+  ctx.fillText(component.name, -2.5, 2.5);
+}
+
+function renderBackground<C extends string>(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  theme: CircTheme<C>,
+  t: number,
+  gridSize = 10
+) {
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const drawBackground = theme.background ?? defaultBackgroundDrawer;
+  drawBackground(ctx, canvas, theme, gridSize);
+
+  ctx.restore();
+}
+
+function renderWires<C extends string>(
+  ctx: CanvasRenderingContext2D,
+  theme: CircTheme<C>,
+  circuit: Circuit,
+  gridSize = 10
+) {
+  ctx.save();
+
+  const drawWires = theme.wires ?? defaultWireDrawer;
+  drawWires(ctx, theme, circuit, gridSize);
 
   ctx.restore();
 }
@@ -129,9 +247,9 @@ const rotationAngles = (facing: string) => {
   }
 };
 
-function renderComponents(
+function renderComponents<C extends string>(
   ctx: CanvasRenderingContext2D,
-  theme: CircTheme,
+  theme: CircTheme<C>,
   circuit: Circuit,
   context: RenderContext,
   gridSize = 10
@@ -207,6 +325,17 @@ function renderComponents(
         rotationAngle,
         portsSignals,
       });
+    } else {
+      defaultComponentDrawer({
+        ctx: ctx,
+        theme: theme,
+        component: component,
+        dimensions:
+          component.name !== "Not Gate" ? [width, height] : [width, 10],
+        pointerLocation: overPin === i ? context.pointerLocation ?? null : null,
+        rotationAngle,
+        portsSignals,
+      });
     }
 
     for (const text of textLayer) {
@@ -215,32 +344,12 @@ function renderComponents(
     context.activePin = overPin;
     ctx.restore();
 
-    const valueIndex = circuit.wireConnections.get(component.location)!;
-    const value = circuit.state[valueIndex];
-
-    ctx.beginPath();
-    ctx.fillStyle = value === 1 ? theme.colors.green : theme.colors.yellow;
-    ctx.arc(x, y, 0.25 * gridSize, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.closePath();
-
-    for (const port of component.ports) {
-      const portLoc = decodeCircCoords(port);
-      const portX = portLoc[0] * gridSize;
-      const portY = portLoc[1] * gridSize;
-      const valueIndex = circuit.wireConnections.get(port)!;
-      const value = circuit.state[valueIndex];
-
-      ctx.beginPath();
-      ctx.fillStyle = value === 1 ? theme.colors.green : theme.colors.yellow;
-      ctx.arc(portX, portY, 0.25 * gridSize, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.closePath();
-    }
+    const drawPorts = theme.ports ?? defaultPortDrawer;
+    drawPorts(ctx, theme, component, circuit, context, gridSize);
   }
 }
 
-export class RenderEngine {
+export class RenderEngine<C extends string> {
   private enabled = false;
   private _canvasElement = document.createElement("canvas");
   private context: RenderContext;
@@ -250,7 +359,7 @@ export class RenderEngine {
     return this._canvasElement;
   }
 
-  constructor(private circuit: Circuit, private options: RenderOptions) {
+  constructor(private circuit: Circuit, public options: RenderOptions<C>) {
     this.context = {
       ...DEFAULT_RENDER_CONTEXT,
       size: options.scale,
@@ -315,10 +424,12 @@ export class RenderEngine {
   }
 
   private processRender() {
-    const { limitFPS = 60, width = 300, height = 300 } = this.options;
-
-    this.canvasElement.width = width;
-    this.canvasElement.height = height;
+    const {
+      limitFPS = 60,
+      width = 300,
+      height = 300,
+      rotate = 0,
+    } = this.options;
 
     const ctx = this.canvasElement.getContext("2d");
 
@@ -336,12 +447,13 @@ export class RenderEngine {
       if (seg > frame) {
         frame = seg;
 
-        ctx?.clearRect(
+        ctx.clearRect(
           0,
           0,
           this.canvasElement.width,
           this.canvasElement.height
         );
+
         ctx.save();
         ctx.scale(this.context.size, this.context.size);
         this.processDrawing(ctx, timestamp - this.time, this.context);

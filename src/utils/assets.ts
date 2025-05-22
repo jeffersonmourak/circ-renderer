@@ -10,7 +10,17 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export function assetsManager() {
+export type AssetsManager = {
+  load: (
+    path: string
+  ) => Generator<
+    HTMLImageElement | undefined,
+    HTMLImageElement | undefined,
+    unknown
+  >;
+};
+
+export function assetsManager(): AssetsManager {
   const assets = new Map<string, HTMLImageElement>();
 
   return {
