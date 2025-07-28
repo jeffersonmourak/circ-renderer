@@ -1,3 +1,4 @@
+import type { CircComp, CircWire } from "../types";
 import {
   as3x1Matrix,
   fromCoordString,
@@ -38,75 +39,83 @@ export type WireData = {
   to: string;
 };
 
-export function isWireElement(element: Element): element is WireComponent {
+export function isWireElement(element: any): element is CircWire {
+  if (!element || typeof element !== "object") {
+    return false;
+  }
+
   return (
-    element.tagName === "wire" &&
-    element.hasAttribute("from") &&
-    element.hasAttribute("to")
+    "from" in element &&
+    "to" in element &&
+    typeof element.from === "string" &&
+    typeof element.to === "string"
   );
 }
 
-function assertValidWire(
-  wireElement: Element
-): asserts wireElement is WireComponent {
-  if (wireElement.tagName !== "wire") {
-    throw new Error("Invalid wire element");
+function assertValidWire(wireObject: any): asserts wireObject is CircWire {
+  if (typeof wireObject !== "object") {
+    throw new Error("Invalid wire object");
   }
 
-  if (!wireElement.hasAttribute("from")) {
-    throw new Error("Wire element does not have coords attribute");
+  if (!("from" in wireObject) || !("to" in wireObject)) {
+    throw new Error("Wire object does not have from or to attributes");
   }
 
-  if (!wireElement.hasAttribute("to")) {
-    throw new Error("Wire element does not have facing attribute");
+  if (
+    typeof wireObject.from !== "string" ||
+    typeof wireObject.to !== "string"
+  ) {
+    throw new Error("Wire object from or to attributes are not strings");
   }
 }
 
-export function parseWire(wireElement: Element) {
-  assertValidWire(wireElement);
+export function parseWire(wireObject: any): WireData {
+  assertValidWire(wireObject);
 
-  const from = wireElement.getAttribute("from");
-  const to = wireElement.getAttribute("to");
-
-  return {
-    from,
-    to,
-  };
+  return wireObject;
 }
 
 export interface CircComponent extends Omit<Element, "getAttribute"> {
   getAttribute(qualifiedName: "loc" | "name"): string;
 }
 
-export function isComponentElement(element: Element): element is CircComponent {
+export function isComponentElement(element: any): element is CircComp {
+  if (!element || typeof element !== "object") {
+    return false;
+  }
+
   return (
-    element.tagName === "comp" &&
-    element.hasAttribute("loc") &&
-    element.hasAttribute("name")
+    "loc" in element &&
+    "name" in element &&
+    typeof element.loc === "string" &&
+    typeof element.name === "string"
   );
 }
 
 export function assertValidComponent(
-  componentElement: Element
-): asserts componentElement is CircComponent {
-  if (componentElement.tagName !== "comp") {
-    throw new Error("Invalid component element");
+  componentElement: any
+): asserts componentElement is CircComp {
+  if (typeof componentElement !== "object") {
+    throw new Error("Invalid component object");
   }
 
-  if (!componentElement.hasAttribute("loc")) {
-    throw new Error("Component element does not have coords attribute");
+  if (!("loc" in componentElement) || !("name" in componentElement)) {
+    throw new Error("Component object does not have loc or name attributes");
   }
 
-  if (!componentElement.hasAttribute("name")) {
-    throw new Error("Component element does not have name attribute");
+  if (typeof componentElement.loc !== "string") {
+    throw new Error("Component object loc attribute is not a string");
+  }
+
+  if (typeof componentElement.name !== "string") {
+    throw new Error("Component object name attribute is not a string");
   }
 }
 
-export function parseComponent(componentElement: Element) {
-  assertValidComponent(componentElement);
+export function parseComponent(componentObject: any) {
+  assertValidComponent(componentObject);
 
-  const name = componentElement.getAttribute("name");
-  const location = componentElement.getAttribute("loc");
+  const { name, loc: location } = componentObject;
 
   const attributes = {
     facing: "east" as ComponentFace,
@@ -115,14 +124,8 @@ export function parseComponent(componentElement: Element) {
     label: undefined as string | undefined,
   };
 
-  for (let i = 0; i < componentElement.children.length; i++) {
-    if (componentElement.children[i].tagName !== "a") {
-      continue;
-    }
-
-    const attribute = componentElement.children[i];
-    const attributeName = attribute.getAttribute("name");
-    const attributeValue = attribute.getAttribute("val");
+  for (const attribute of componentObject.a ?? []) {
+    const { name: attributeName, val: attributeValue } = attribute;
 
     if (!attributeName || !attributeValue) {
       continue;

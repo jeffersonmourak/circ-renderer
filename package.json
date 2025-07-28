@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@codemirror/language": "^6.10.6",
+    "fast-xml-parser": "^5.2.3",
     "lodash": "^4.17.21",
     "uuid": "^11.0.3"
   }

@@ -1,3 +1,4 @@
+import { XMLParser } from "fast-xml-parser";
 import {
   isComponentElement,
   isWireElement,
@@ -5,6 +6,7 @@ import {
   parseWire,
   type WireData,
 } from "../utils";
+import type { CircCircuit, CircFile } from "../types";
 
 function mapWireConnectionsToStates(wires: WireData[]): Map<string, number> {
   const wiresMap = new Map<string, number>();
@@ -106,17 +108,13 @@ export interface Circuit {
   };
 }
 
-function parseCircuit(circuitElement: Element): Circuit {
-  const name = circuitElement.getAttribute("name") ?? "unnamed";
+function parseCircuit(circuitElement: CircCircuit): Circuit {
+  const { name, wire, comp } = circuitElement;
 
-  const wires = Array.from(circuitElement.getElementsByTagName("wire"))
-    .filter(isWireElement)
-    .map(parseWire);
+  const wires = wire.filter(isWireElement).map(parseWire);
 
   const components: CircuitComponent[] = [];
-  const rawComponents = Array.from(circuitElement.getElementsByTagName("comp"))
-    .filter(isComponentElement)
-    .map(parseComponent);
+  const rawComponents = comp.filter(isComponentElement).map(parseComponent);
 
   const wireConnections = mapWireConnectionsToStates(wires);
   const connectionMap = new Map<number, number[]>();
@@ -195,9 +193,56 @@ function parseCircuit(circuitElement: Element): Circuit {
   };
 }
 
-export function loadLogisimInput(xmlSourceCode: string): Circuit[] {
-  const parser = new DOMParser();
-  const xmlDoc = parser.parseFromString(xmlSourceCode, "text/xml");
+function assertValidCircFile(parsed: any): asserts parsed is CircFile {
+  if (parsed.project === undefined) {
+    throw new Error("Invalid Logisim file: Missing project element");
+  }
 
-  return Array.from(xmlDoc.getElementsByTagName("circuit")).map(parseCircuit);
+  if (typeof parsed.project !== "object") {
+    throw new Error("Invalid Logisim file: Invalid project element");
+  }
+
+  const { circuit, source, main } = parsed.project;
+
+  if (circuit === undefined) {
+    throw new Error("Invalid Logisim file: Missing circuit element");
+  }
+
+  if (source === undefined || typeof source !== "string") {
+    throw new Error("Invalid Logisim file: Missing source attribute");
+  }
+
+  if (main !== undefined) {
+    if (typeof main !== "object") {
+      throw new Error("Invalid Logisim file: Invalid main element");
+    }
+
+    if (main.name === undefined || typeof main.name !== "string") {
+      throw new Error("Invalid Logisim file: Missing main name attribute");
+    }
+  }
+
+  const ultimateTestString = `This file is intended to be loaded by Logisim-evolution v${source}(https://github.com/logisim-evolution/).`;
+
+  if (parsed.project["#text"] !== ultimateTestString) {
+    throw new Error(
+      `Invalid Logisim file: Invalid source attribute. Expected "${ultimateTestString}", but got "${parsed.project["#text"]}"`
+    );
+  }
+}
+
+export function loadLogisimInput(xmlSourceCode: string): Circuit[] {
+  const newParser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: "",
+    isArray: (name) => {
+      const arrayTags = ["circuit", "wire", "comp", "a"];
+      return arrayTags.includes(name);
+    },
+  });
+  const parsed = newParser.parse(xmlSourceCode);
+
+  assertValidCircFile(parsed);
+
+  return parsed.project.circuit.map(parseCircuit);
 }
