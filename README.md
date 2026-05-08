@@ -146,7 +146,3 @@ bun run dev
 ```
 
 `example/static/*.wasm` are pre-compiled fixtures from `circ-compiler` (`circ-compile path/to.circ -o foo.wasm`).
-
-## License
-
-CC-BY-4.0
