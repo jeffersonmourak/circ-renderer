@@ -203,8 +203,16 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   /** Hit-test using cell-aligned bounding boxes. */
   private componentAtEvent(e: MouseEvent): number | null {
     const rect = this.canvas.getBoundingClientRect();
-    const px = e.clientX - rect.left - this.padding;
-    const py = e.clientY - rect.top - this.padding;
+    // The renderer set canvas.style.{width,height} = layout-extent * cell + pad*2,
+    // but page CSS (e.g. max-width: 100%) can shrink the rendered rect. Scale the
+    // pointer coords back into intended-pixel space so they align with the layout
+    // grid that was drawn into the canvas's transform.
+    const intendedW = this.layout.width * this.cell + this.padding * 2;
+    const intendedH = this.layout.height * this.cell + this.padding * 2;
+    const scaleX = rect.width > 0 ? intendedW / rect.width : 1;
+    const scaleY = rect.height > 0 ? intendedH / rect.height : 1;
+    const px = (e.clientX - rect.left) * scaleX - this.padding;
+    const py = (e.clientY - rect.top) * scaleY - this.padding;
     const cx = px / this.cell;
     const cy = py / this.cell;
     for (const c of this.layout.components) {
