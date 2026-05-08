@@ -22,6 +22,14 @@ interface PendingWire {
   sx: number; sy: number;
   dx: number; dy: number;
   trackX: number;
+  /**
+   * Destination-side approach column. For wires going right (dx > sx)
+   * this is the default `dx - 1`; for wraparound wires (dx < sx) it
+   * gets bumped left to a unique column per super-trunk so multiple
+   * sources terminating at the same dx don't pile their vertical drops
+   * into one column.
+   */
+  txDst: number;
   segments: Segment[];
 }
 
@@ -79,6 +87,7 @@ export function route(
         dx: dstCoord.x,
         dy: dstCoord.y,
         trackX: 0,
+        txDst: dstCoord.x >= 1 ? dstCoord.x - 1 : dstCoord.x,
         segments: [],
       });
     }
@@ -196,11 +205,112 @@ export function route(
     }
   }
 
+  // Snapshot every source-side V track now that trackX allocation is done.
+  // The wraparound (txDst) pass below consults this so its leftward search
+  // doesn't land on a column already owned by some other source's V leg —
+  // forward and wraparound wires from different sources share the same
+  // grid and need to coexist without overlapping verticals.
+  const globalVTracks: Array<{ col: number; srcId: number; yMin: number; yMax: number }> = [];
+  for (const t of trunks) {
+    globalVTracks.push({ col: t.trackX, srcId: t.srcId, yMin: t.yMin, yMax: t.yMax });
+  }
+
+  // 3.5. For wraparound wires (dx < sx) the path leaves the source going
+  // RIGHT, drops down/up, runs LEFT across the middle, and approaches the
+  // destination from its left at column `dx-1`. Multiple wraparound wires
+  // landing on the same dx default to dx-1, AND any forward source-side
+  // trackX ending near dx can also land on dx-1 — both create V-on-V
+  // overlap when y-ranges intersect. Allocate a unique approach column
+  // per wraparound super-trunk going leftward, checking BOTH the prior
+  // wraparound allocations AND the global trackX list.
+  type DstTrunk = { srcId: number; dx: number; pendingIdxs: number[]; yMin: number; yMax: number };
+  const dstTrunkMap = new Map<string, DstTrunk>();
+  for (let i = 0; i < pending.length; i++) {
+    const w = pending[i];
+    if (w.dx >= w.sx) continue; // not a wraparound
+    const key = `${w.srcId}|${w.dx}`;
+    let dt = dstTrunkMap.get(key);
+    if (!dt) {
+      dt = { srcId: w.srcId, dx: w.dx, pendingIdxs: [], yMin: Infinity, yMax: -Infinity };
+      dstTrunkMap.set(key, dt);
+    }
+    const yMin = min(w.sy, w.dy), yMax = max(w.sy, w.dy);
+    if (yMin < dt.yMin) dt.yMin = yMin;
+    if (yMax > dt.yMax) dt.yMax = yMax;
+    dt.pendingIdxs.push(i);
+  }
+  // Group by destination column so wraparound trunks landing on the same
+  // dx are handled together; widest y-extent claims the closest column.
+  const dxBuckets = new Map<number, DstTrunk[]>();
+  for (const dt of dstTrunkMap.values()) {
+    let arr = dxBuckets.get(dt.dx);
+    if (!arr) { arr = []; dxBuckets.set(dt.dx, arr); }
+    arr.push(dt);
+  }
+  // Track every wraparound-allocated column in a single pool so trunks
+  // landing on different dx values can still see each other's claims.
+  const wrapAllocated: Array<{ col: number; srcId: number; yMin: number; yMax: number }> = [];
+  for (const dts of dxBuckets.values()) {
+    dts.sort((a, b) => {
+      const aSpread = a.yMax - a.yMin, bSpread = b.yMax - b.yMin;
+      if (aSpread !== bSpread) return bSpread - aSpread;
+      return a.srcId - b.srcId;
+    });
+    for (const dt of dts) {
+      let candidate = dt.dx - 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (candidate < 0) break;
+        let blocked =
+          bboxBlocksColumn(placed, candidate, dt.yMin, dt.yMax) ||
+          portApproachInRange(placed, candidate, dt.yMin, dt.yMax);
+        if (!blocked) {
+          for (const g of globalVTracks) {
+            if (g.col !== candidate) continue;
+            if (g.srcId === dt.srcId) continue;
+            if (g.yMin > dt.yMax || g.yMax < dt.yMin) continue;
+            blocked = true; break;
+          }
+        }
+        if (!blocked) {
+          for (const u of wrapAllocated) {
+            if (u.srcId === dt.srcId) continue;
+            if (u.col !== candidate) {
+              if (Math.abs(u.col - candidate) !== 1) continue;
+            }
+            if (u.yMin > dt.yMax || u.yMax < dt.yMin) continue;
+            blocked = true; break;
+          }
+        }
+        if (!blocked) break;
+        candidate--;
+      }
+      if (candidate < 0) continue; // ran out of room — keep default dx-1
+      wrapAllocated.push({ col: candidate, srcId: dt.srcId, yMin: dt.yMin, yMax: dt.yMax });
+      for (const wi of dt.pendingIdxs) pending[wi].txDst = candidate;
+    }
+  }
+
   // 4. Generate segments.
   let placementMaxY = 0;
   for (const p of placed) {
     if (p.y + p.height > placementMaxY) placementMaxY = p.y + p.height;
   }
+
+  // Track every H leg as it's emitted so subsequent 5-leg wires can avoid
+  // landing their middle horizontal on a row already used by a different
+  // source's H. Without this, two unrelated 5-leg paths can both pick the
+  // same `freeY` and overdraw each other across a long span.
+  const hUsage = new Map<number, Array<{ srcId: number; xMin: number; xMax: number }>>();
+  const recordH = (srcId: number, seg: Segment) => {
+    if (seg.from.y !== seg.to.y) return;
+    const y = seg.from.y;
+    const xMin = min(seg.from.x, seg.to.x);
+    const xMax = max(seg.from.x, seg.to.x);
+    let arr = hUsage.get(y);
+    if (!arr) { arr = []; hUsage.set(y, arr); }
+    arr.push({ srcId, xMin, xMax });
+  };
 
   for (const w of pending) {
     const tx = w.trackX;
@@ -212,7 +322,7 @@ export function route(
       !isVSegBlocked(placed, tx, w.sy, w.dy) &&
       !isHSegBlocked(placed, tx, w.dx, w.dy);
 
-    const txDst = w.dx >= 1 ? w.dx - 1 : w.dx;
+    const txDst = w.txDst;
     const canUseLAtTxDst =
       w.dx > w.sx && txDst !== tx && txDst > w.sx &&
       !isHSegBlocked(placed, w.sx, txDst, w.sy) &&
@@ -234,7 +344,7 @@ export function route(
       const xLo = min(tx, txDst);
       const xHi = max(tx, txDst);
       const freeY = haveRoom
-        ? findFreeY(placed, xLo, xHi, tx, txDst, w.sy, w.dy, placementMaxY)
+        ? findFreeY(placed, xLo, xHi, tx, txDst, w.sy, w.dy, placementMaxY, hUsage, w.srcId)
         : null;
 
       if (freeY !== null) {
@@ -250,6 +360,7 @@ export function route(
       }
     }
     w.segments = segs;
+    for (const seg of segs) recordH(w.srcId, seg);
   }
 
   // 4.5. Detour pass: when a wire's destination-approach H overlaps
@@ -502,20 +613,29 @@ function findFreeY(
   xLo: number, xHi: number,
   tx: number, txDst: number,
   sy: number, dy: number,
-  bound: number
+  bound: number,
+  hUsage: Map<number, Array<{ srcId: number; xMin: number; xMax: number }>>,
+  srcId: number
 ): number | null {
   const searchLimit = bound + 16;
-  for (let radius = 0; radius <= searchLimit; radius++) {
-    if (radius > 0) {
-      const below = sy + radius;
-      if (below <= searchLimit && detourYIsClear(placed, xLo, xHi, tx, txDst, sy, dy, below)) {
-        return below;
+  // Two-pass scan: first prefer a row with at least one empty row of
+  // gutter between us and any other source's H at overlapping x, since
+  // adjacent parallel wires of different colors visually merge with
+  // thick line widths. Fall back to "just no exact-row overlap" if no
+  // gutter row is available.
+  for (const requireGutter of [true, false]) {
+    for (let radius = 0; radius <= searchLimit; radius++) {
+      if (radius > 0) {
+        const below = sy + radius;
+        if (below <= searchLimit && detourYIsClear(placed, xLo, xHi, tx, txDst, sy, dy, below, hUsage, srcId, requireGutter)) {
+          return below;
+        }
       }
-    }
-    if (sy >= radius) {
-      const above = sy - radius;
-      if (detourYIsClear(placed, xLo, xHi, tx, txDst, sy, dy, above)) {
-        return above;
+      if (sy >= radius) {
+        const above = sy - radius;
+        if (detourYIsClear(placed, xLo, xHi, tx, txDst, sy, dy, above, hUsage, srcId, requireGutter)) {
+          return above;
+        }
       }
     }
   }
@@ -527,7 +647,10 @@ function detourYIsClear(
   xLo: number, xHi: number,
   tx: number, txDst: number,
   sy: number, dy: number,
-  candidate: number
+  candidate: number,
+  hUsage: Map<number, Array<{ srcId: number; xMin: number; xMax: number }>>,
+  srcId: number,
+  requireGutter: boolean
 ): boolean {
   if (isHSegBlocked(placed, xLo, xHi, candidate)) return false;
   if (isVSegBlocked(placed, tx, sy, candidate)) return false;
@@ -541,6 +664,21 @@ function detourYIsClear(
       if (port.coord.y === candidate) return false;
     }
     if (p.outPort.y === candidate) return false;
+  }
+  // Avoid rows where another wire has already laid an H leg overlapping
+  // our [xLo, xHi] span — the detour's middle horizontal would draw on
+  // top of it. Same-source overlaps are fine (fan-out shares trunks).
+  // When `requireGutter` is set, also avoid the immediate neighbour rows
+  // so we don't end up running parallel one row apart.
+  const offsets = requireGutter ? [-1, 0, 1] : [0];
+  for (const off of offsets) {
+    const existing = hUsage.get(candidate + off);
+    if (!existing) continue;
+    for (const e of existing) {
+      if (e.srcId === srcId) continue;
+      if (e.xMax <= xLo || xHi <= e.xMin) continue;
+      return false;
+    }
   }
   return true;
 }

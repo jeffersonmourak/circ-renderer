@@ -8,15 +8,24 @@ import {
 
 /**
  * Stage 2: longest-path column assignment, cycle-aware.
- *   - input_pin pinned at column 0.
- *   - Other nodes: column_of[n] = 1 + max(column_of[upstream]).
- *   - Edges WITHIN the same strongly-connected component (cycles) are
- *     skipped, so cycle members don't push each other forward forever.
- *   - All members of a multi-node SCC get pinned to the SCC's max column
- *     after the sweep.
- *   - led / output_pin forced to num_columns - 1 so all sinks line up right.
  *
- * Fixed-point sweep, capped at `nodes.len + 1` passes.
+ * Rules:
+ *   - `input_pin` primitives are pinned at column 0.
+ *   - For every other node: `column_of[n] = 1 + max(column_of[upstream])`
+ *     across all incoming edges *excluding back edges that close a cycle*.
+ *   - `led` and `output_pin` primitives are forced to `numColumns - 1` so
+ *     all sinks line up on the right edge.
+ *
+ * Cycle handling: a pre-pass DFS classifies each edge as tree/forward/cross
+ * (DAG) or back (closes a cycle). Back edges are skipped in the longest-
+ * path sweep — without that, every iteration through the cycle bumps each
+ * member's column and the sweep only stops at the iteration cap, stranding
+ * upstream nodes at low columns and pushing cycle nodes to the far right.
+ *
+ * Gutter rule: a node whose only incoming edges are back edges (an orphan
+ * cycle entry) gets bumped from col 0 → col 1, leaving column 0 empty so
+ * the router's 5-leg leftward feedback path has a west gutter to anchor
+ * its arc on. At column 0 there is no cell west of the in-port.
  */
 export function assignColumns(graph: VirtualGraph): ColumnAssignment {
   const n = graph.nodes.length;
@@ -25,7 +34,15 @@ export function assignColumns(graph: VirtualGraph): ColumnAssignment {
   const indexOf = new Map<number, number>();
   for (let i = 0; i < n; i++) indexOf.set(graph.nodes[i].id, i);
 
-  const { sccOf, sccs } = findSccs(graph, indexOf);
+  const backEdges = detectBackEdges(graph, indexOf);
+
+  // A "back-edge destination" with no forward upstream still needs col ≥ 1.
+  const isBackEdgeDst = new Array<boolean>(n).fill(false);
+  for (const key of backEdges) {
+    const [, dstId] = decodeEdgeKey(key);
+    const dstIdx = indexOf.get(dstId);
+    if (dstIdx !== undefined) isBackEdgeDst[dstIdx] = true;
+  }
 
   let iter = 0;
   let changed = true;
@@ -42,13 +59,14 @@ export function assignColumns(graph: VirtualGraph): ColumnAssignment {
       }
       let maxUpstreamPlusOne = 0;
       for (const e of node.inputs) {
+        if (backEdges.has(edgeKey(e.srcId, node.id, e.srcPort, e.dstPort))) continue;
         const upIdx = indexOf.get(e.srcId);
         if (upIdx === undefined) continue;
-        // Skip same-SCC edges inside multi-node cycles — they're feedback
-        // edges and shouldn't grow either node's column.
-        if (sccOf[upIdx] === sccOf[i] && sccs[sccOf[i]].length > 1) continue;
         const cand = columnOf[upIdx] + 1;
         if (cand > maxUpstreamPlusOne) maxUpstreamPlusOne = cand;
+      }
+      if (maxUpstreamPlusOne === 0 && isBackEdgeDst[i]) {
+        maxUpstreamPlusOne = 1;
       }
       if (maxUpstreamPlusOne !== columnOf[i]) {
         columnOf[i] = maxUpstreamPlusOne;
@@ -56,15 +74,6 @@ export function assignColumns(graph: VirtualGraph): ColumnAssignment {
       }
     }
     iter++;
-  }
-
-  // Pin every multi-node SCC's members to the SCC's max column so they
-  // share a single column even though they reference each other.
-  for (const scc of sccs) {
-    if (scc.length <= 1) continue;
-    let max = 0;
-    for (const idx of scc) if (columnOf[idx] > max) max = columnOf[idx];
-    for (const idx of scc) columnOf[idx] = max;
   }
 
   let numColumns = 1;
@@ -77,74 +86,62 @@ export function assignColumns(graph: VirtualGraph): ColumnAssignment {
   return { columnOf, numColumns };
 }
 
+/** Encode an edge as a string key — both endpoints' ports matter, since a
+ * node can fan in from the same source on multiple ports. */
+const edgeKey = (srcId: number, dstId: number, srcPort: number, dstPort: number): string =>
+  `${srcId}|${dstId}|${srcPort}|${dstPort}`;
+
+const decodeEdgeKey = (k: string): [number, number] => {
+  const [srcStr, dstStr] = k.split("|");
+  return [Number(srcStr), Number(dstStr)];
+};
+
 /**
- * Tarjan's strongly-connected components — iterative variant to avoid
- * blowing the stack on long chains. Each returned SCC is a list of
- * node indices into `graph.nodes`.
+ * Iterative DFS over output edges. An edge `u → v` is a *back edge* iff `v`
+ * is currently on the recursion stack (gray). Back edges are exactly the
+ * edges that close cycles in any DFS spanning forest, and removing them
+ * leaves a DAG.
+ *
+ * Roots are visited in `graph.nodes` index order (collapse sorts by id),
+ * which makes the back-edge set deterministic across runs.
  */
-function findSccs(
+function detectBackEdges(
   graph: VirtualGraph,
   indexOf: Map<number, number>
-): { sccOf: number[]; sccs: number[][] } {
+): Set<string> {
   const n = graph.nodes.length;
-  const idx = new Array<number>(n).fill(-1);
-  const low = new Array<number>(n).fill(0);
-  const onStack = new Array<boolean>(n).fill(false);
-  const stk: number[] = [];
-  const sccOf = new Array<number>(n).fill(-1);
-  const sccs: number[][] = [];
-  let counter = 0;
-
-  type Frame = { v: number; outs: number[]; nextOut: number };
-  const callStack: Frame[] = [];
+  // 0=white, 1=gray (on stack), 2=black (finished).
+  const color = new Array<number>(n).fill(0);
+  const back = new Set<string>();
+  type Frame = { nodeIdx: number; nextEdge: number };
+  const stack: Frame[] = [];
 
   for (let start = 0; start < n; start++) {
-    if (idx[start] !== -1) continue;
-    callStack.push({
-      v: start,
-      outs: graph.nodes[start].outputs.map((e) => indexOf.get(e.dstId) ?? -1).filter((i) => i >= 0),
-      nextOut: 0,
-    });
-    idx[start] = counter; low[start] = counter; counter++;
-    stk.push(start); onStack[start] = true;
-
-    while (callStack.length > 0) {
-      const top = callStack[callStack.length - 1];
-      if (top.nextOut < top.outs.length) {
-        const w = top.outs[top.nextOut++];
-        if (idx[w] === -1) {
-          idx[w] = counter; low[w] = counter; counter++;
-          stk.push(w); onStack[w] = true;
-          callStack.push({
-            v: w,
-            outs: graph.nodes[w].outputs.map((e) => indexOf.get(e.dstId) ?? -1).filter((i) => i >= 0),
-            nextOut: 0,
-          });
-        } else if (onStack[w]) {
-          if (idx[w] < low[top.v]) low[top.v] = idx[w];
-        }
-      } else {
-        if (low[top.v] === idx[top.v]) {
-          const scc: number[] = [];
-          while (true) {
-            const w = stk.pop()!;
-            onStack[w] = false;
-            sccOf[w] = sccs.length;
-            scc.push(w);
-            if (w === top.v) break;
-          }
-          sccs.push(scc);
-        }
-        callStack.pop();
-        if (callStack.length > 0) {
-          const parent = callStack[callStack.length - 1];
-          if (low[top.v] < low[parent.v]) low[parent.v] = low[top.v];
-        }
+    if (color[start] !== 0) continue;
+    color[start] = 1;
+    stack.push({ nodeIdx: start, nextEdge: 0 });
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      const node = graph.nodes[top.nodeIdx];
+      if (top.nextEdge >= node.outputs.length) {
+        color[top.nodeIdx] = 2;
+        stack.pop();
+        continue;
       }
+      const edge = node.outputs[top.nextEdge++];
+      const dstIdx = indexOf.get(edge.dstId);
+      if (dstIdx === undefined) continue;
+      const c = color[dstIdx];
+      if (c === 1) {
+        back.add(edgeKey(node.id, edge.dstId, edge.srcPort, edge.dstPort));
+      } else if (c === 0) {
+        color[dstIdx] = 1;
+        stack.push({ nodeIdx: dstIdx, nextEdge: 0 });
+      }
+      // black: forward or cross edge — DAG, no action.
     }
   }
-
-  return { sccOf, sccs };
+  return back;
 }
 
 const isInputPin = (n: VirtualNode): boolean =>
