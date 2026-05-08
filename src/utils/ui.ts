@@ -1,5 +1,3 @@
-import type { AssetsManager } from "../utils";
-
 const supportedPathDrawingStyles = [
   "lineCap",
   "lineDashOffset",
@@ -161,35 +159,6 @@ export function text({
   }
 
   ctx.closePath();
-}
-
-export function image({
-  ctx,
-  assetLoader,
-  image,
-  position,
-  dimensions,
-}: {
-  ctx: CanvasRenderingContext2D;
-  assetLoader: AssetsManager;
-  image: string;
-  position: [number, number];
-  dimensions: [number, number];
-}) {
-  if (!assetLoader.load(image).next().done) {
-    return;
-  }
-
-  // biome-ignore lint/style/noNonNullAssertion: The done above makes sure this is not undefined
-  const imageAsset = assetLoader.load(image).next().value!;
-
-  ctx.drawImage(
-    imageAsset,
-    position[0],
-    position[1],
-    dimensions[0],
-    dimensions[1]
-  );
 }
 
 function isEvaluation<K extends string>(
