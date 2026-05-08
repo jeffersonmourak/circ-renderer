@@ -155,21 +155,38 @@ export function route(
       return a - b;
     });
 
-    // Allocate one unique trackX per super-trunk.
+    // Allocate one unique trackX per super-trunk. Two trunks may share
+    // adjacent columns if their y-ranges are disjoint (no visual merge);
+    // otherwise we skip a column to leave a gutter between them. Each
+    // already-allocated trunk's (col, y-range) is recorded so subsequent
+    // allocations can detect adjacency conflicts directly.
     const taken = new Set<number>();
+    const used: Array<{ col: number; yMin: number; yMax: number }> = [];
     for (const stIdx of superOrder) {
       const st = supers[stIdx];
       const stSx = trunks[st.members[0]].sx;
       let candidate = stSx + 1;
-      while (
-        taken.has(candidate) ||
-        bboxBlocksColumn(placed, candidate, st.yMin, st.yMax) ||
-        portApproachInRange(placed, candidate, st.yMin, st.yMax)
-      ) {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        let blocked =
+          taken.has(candidate) ||
+          bboxBlocksColumn(placed, candidate, st.yMin, st.yMax) ||
+          portApproachInRange(placed, candidate, st.yMin, st.yMax);
+        if (!blocked) {
+          for (const u of used) {
+            if (Math.abs(u.col - candidate) === 1 &&
+                u.yMin <= st.yMax && u.yMax >= st.yMin) {
+              blocked = true;
+              break;
+            }
+          }
+        }
+        if (!blocked) break;
         candidate++;
         if (candidate > 1_000_000) throw new Error("route: track allocation runaway");
       }
       taken.add(candidate);
+      used.push({ col: candidate, yMin: st.yMin, yMax: st.yMax });
       for (const ti of st.members) {
         trunks[ti].trackX = candidate;
         for (const wi of trunks[ti].wires) pending[wi].trackX = candidate;
@@ -233,6 +250,13 @@ export function route(
     w.segments = segs;
   }
 
+  // 4.5. Detour pass: when a wire's destination-approach H overlaps
+  // another wire's H at the same row (different sources), re-route the
+  // last leg through dy±1 with a small step at the very end. Keeps
+  // wires axis-aligned without overlap, instead of relying on the
+  // theme to bend wires for visual separation.
+  detourHConflicts(pending, placed);
+
   // 5. Pairwise crossing detection. Only true crossings — where one wire's
   // horizontal passes STRICTLY through another wire's vertical (or vice
   // versa) at a non-endpoint, non-corner cell. Skip:
@@ -283,6 +307,117 @@ export function route(
   }
 
   return { wires, width: maxX, height: maxY };
+}
+
+/**
+ * Re-route the destination-approach H of any wire that overlaps another
+ * wire's horizontal at the same row (from a different source). The new
+ * path bends through dy±1, lays the long H one row above or below the
+ * conflict, and steps back to the destination port at the very end.
+ */
+function detourHConflicts(pending: PendingWire[], placed: PlacedComponent[]): void {
+  // Build per-row H ranges so we can re-check feasibility after each detour.
+  const rebuildRanges = () => {
+    const byRow = new Map<number, Array<{ wireIdx: number; srcId: number; xMin: number; xMax: number }>>();
+    for (let i = 0; i < pending.length; i++) {
+      const w = pending[i];
+      for (const seg of w.segments) {
+        if (seg.from.y !== seg.to.y) continue;
+        const y = seg.from.y;
+        const xMin = min(seg.from.x, seg.to.x);
+        const xMax = max(seg.from.x, seg.to.x);
+        let arr = byRow.get(y);
+        if (!arr) { arr = []; byRow.set(y, arr); }
+        arr.push({ wireIdx: i, srcId: w.srcId, xMin, xMax });
+      }
+    }
+    return byRow;
+  };
+
+  // For a candidate row, would an H from xLo to xHi overlap another
+  // wire's H (different srcId, strict overlap)?
+  const rowConflicts = (
+    byRow: Map<number, Array<{ wireIdx: number; srcId: number; xMin: number; xMax: number }>>,
+    y: number, xLo: number, xHi: number, srcId: number, ignoreWire: number
+  ): boolean => {
+    const segs = byRow.get(y);
+    if (!segs) return false;
+    for (const s of segs) {
+      if (s.wireIdx === ignoreWire) continue;
+      if (s.srcId === srcId) continue;
+      if (s.xMax <= xLo || xHi <= s.xMin) continue;
+      return true;
+    }
+    return false;
+  };
+
+  // Process wires in order. For each conflicting wire, attempt to detour.
+  let byRow = rebuildRanges();
+  for (let wi = 0; wi < pending.length; wi++) {
+    const w = pending[wi];
+    if (w.segments.length < 2) continue;
+    const lastIdx = w.segments.length - 1;
+    const lastSeg = w.segments[lastIdx];
+    if (lastSeg.from.y !== lastSeg.to.y) continue; // not horizontal
+
+    // Is this destination-approach H in conflict?
+    const lastXLo = min(lastSeg.from.x, lastSeg.to.x);
+    const lastXHi = max(lastSeg.from.x, lastSeg.to.x);
+    if (!rowConflicts(byRow, w.dy, lastXLo, lastXHi, w.srcId, wi)) continue;
+
+    // Need: the segment BEFORE last is the V from track to dy, ending at
+    // (last.from.x, last.from.y). We'll replace the last 2 segments
+    // (V + H) with V (to newY) + H (at newY) + V (back to dy).
+    const beforeLast = lastSeg; // last seg is H; the seg before it is V.
+    if (lastIdx < 1) continue;
+    const vSeg = w.segments[lastIdx - 1];
+    if (vSeg.from.x !== vSeg.to.x) continue; // expected V; bail otherwise
+
+    const trackX = vSeg.from.x;
+    const dx = w.dx;
+    const dy = w.dy;
+    if (trackX === dx) continue; // already at the destination column
+
+    // Try +1, -1, +2, -2 row offsets.
+    for (const off of [-1, 1, -2, 2]) {
+      const newY = dy + off;
+      if (newY < 0) continue;
+      // V from (trackX, vSeg.from.y) → (trackX, newY).
+      if (isVSegBlocked(placed, trackX, vSeg.from.y, newY)) continue;
+      // H from (trackX, newY) → (dx, newY).
+      if (isHSegBlocked(placed, trackX, dx, newY)) continue;
+      // V from (dx, newY) → (dx, dy).
+      if (isVSegBlocked(placed, dx, newY, dy)) continue;
+      // H at newY must not conflict with another wire's H.
+      const hLo = min(trackX, dx), hHi = max(trackX, dx);
+      if (rowConflicts(byRow, newY, hLo, hHi, w.srcId, wi)) continue;
+      // V at dx column shouldn't crash a port-approach for some other
+      // component (would make the marker dot land on a foreign wire).
+      // Cheap check: skip if the V passes through another component's
+      // in-port row at column dx.
+      let portCollision = false;
+      for (const p of placed) {
+        for (const port of p.inPorts) {
+          if (port.coord.x !== dx) continue;
+          const lo = min(newY, dy), hi = max(newY, dy);
+          if (port.coord.y >= lo && port.coord.y <= hi && p.id !== w.dstId) {
+            portCollision = true; break;
+          }
+        }
+        if (portCollision) break;
+      }
+      if (portCollision) continue;
+
+      // Apply: drop last 2 segments, append the 3-leg detour.
+      const newSegs = w.segments.slice(0, lastIdx - 1);
+      newSegs.push({ from: { x: trackX, y: vSeg.from.y }, to: { x: trackX, y: newY } });
+      newSegs.push({ from: { x: trackX, y: newY }, to: { x: dx, y: newY } });
+      newSegs.push({ from: { x: dx, y: newY }, to: { x: dx, y: dy } });
+      w.segments = newSegs;
+      byRow = rebuildRanges();
+      break;
+    }
+  }
 }
 
 function portCoordOf(pc: PlacedComponent, dstPort: number): PortCoord | null {

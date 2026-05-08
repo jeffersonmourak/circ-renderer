@@ -48,6 +48,7 @@ export {
   type SkinContext,
   type WireDrawContext,
   type BackgroundContext,
+  type PortMarkerContext,
   type SignalStyle,
 } from "./utils/theme";
 

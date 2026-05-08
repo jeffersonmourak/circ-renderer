@@ -36,6 +36,13 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
   /** Per-wire signal (snapshot of source's output). Recomputed on refresh. */
   private wireSignal = new Map<number, Signal>();
+  /**
+   * Per-wire conflict tier for theme-driven sub-cell bias. 0 = no
+   * horizontal-on-horizontal collision; 1+ = collides with a wire from
+   * a different source at the same row. Stable across draws so themes
+   * that bend wires for visual separation only do so where it helps.
+   */
+  private wireTier = new Map<number, number>();
 
   constructor(
     private runtime: CircRuntime,
@@ -47,8 +54,49 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     if (!ctx) throw new Error("CircCanvas: 2d context unavailable");
     this.ctx = ctx;
     this.resize();
+    this.computeWireTiers();
     if (options.interactive ?? true) this.attach();
     this.refreshState();
+  }
+
+  /**
+   * Walk all horizontal segments grouped by row. For any pair of H
+   * segments from DIFFERENT sources whose x-ranges overlap, mark the
+   * higher-srcId wire as tier 1. Themes can use this hint to bias
+   * wires off-grid only when a real collision exists, leaving other
+   * wires straight.
+   */
+  private computeWireTiers(): void {
+    this.wireTier.clear();
+    type HSeg = { wireIdx: number; srcId: number; xMin: number; xMax: number };
+    const segByRow = new Map<number, HSeg[]>();
+    for (let i = 0; i < this.layout.wires.length; i++) {
+      const w = this.layout.wires[i];
+      for (const seg of w.segments) {
+        if (seg.from.y !== seg.to.y) continue;
+        const y = seg.from.y;
+        const xMin = Math.min(seg.from.x, seg.to.x);
+        const xMax = Math.max(seg.from.x, seg.to.x);
+        let arr = segByRow.get(y);
+        if (!arr) { arr = []; segByRow.set(y, arr); }
+        arr.push({ wireIdx: i, srcId: w.srcId, xMin, xMax });
+      }
+    }
+    for (const segs of segByRow.values()) {
+      for (let i = 0; i < segs.length; i++) {
+        for (let j = i + 1; j < segs.length; j++) {
+          const a = segs[i], b = segs[j];
+          if (a.srcId === b.srcId) continue;
+          // Strict overlap: shared endpoint at a single x doesn't count
+          // as a visual conflict, since segment endpoints are corners
+          // already differentiated by their direction change.
+          if (a.xMax <= b.xMin || b.xMax <= a.xMin) continue;
+          // Different sources, overlapping H — bump the higher-srcId one.
+          const loser = a.srcId > b.srcId ? a.wireIdx : b.wireIdx;
+          if ((this.wireTier.get(loser) ?? 0) < 1) this.wireTier.set(loser, 1);
+        }
+      }
+    }
   }
 
   private get cell(): number { return this.options.cell ?? DEFAULTS.cell; }
@@ -75,12 +123,37 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   refreshState(): void {
     this.signals = this.runtime.snapshot();
     // Wire signal := source component's output state.
+    // For wires whose srcId is a synthetic subcircuit node (created by
+    // the collapse stage and therefore unknown to the runtime), trace
+    // back through the original topology to find the real underlying
+    // source: the component whose connection points at this wire's
+    // (dstId, dstPort) in the un-collapsed graph.
     this.wireSignal.clear();
+    const realComponentIds = new Set(this.runtime.topology.components.map((c) => c.id));
     for (let i = 0; i < this.layout.wires.length; i++) {
       const w = this.layout.wires[i];
-      this.wireSignal.set(i, this.signals.get(w.srcId) ?? 2);
+      let sig = this.signals.get(w.srcId);
+      if (sig === undefined && !realComponentIds.has(w.srcId)) {
+        const realSrcId = this.findRealSourceForWire(w.dstId, w.dstPort);
+        if (realSrcId !== undefined) sig = this.signals.get(realSrcId);
+      }
+      this.wireSignal.set(i, sig ?? 2);
     }
     this.draw();
+  }
+
+  /**
+   * Walk the un-collapsed topology connections to find the component that
+   * actually drives `(dstId, dstPort)`. Used when a wire's `srcId` is a
+   * synthetic subcircuit node — the real driver is whatever fed that
+   * port in the original graph before the collapse stage rewrote the
+   * edge to come from the synthetic id.
+   */
+  private findRealSourceForWire(dstId: number, dstPort: number): number | undefined {
+    for (const conn of this.runtime.topology.connections) {
+      if (conn.toId === dstId && conn.port === dstPort) return conn.fromId;
+    }
+    return undefined;
   }
 
   destroy(): void {
@@ -170,7 +243,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     // extend INTO the source/destination boxes so the wire visually meets
     // the gate edge. The component fills paint over the inside parts.
     for (let i = 0; i < layout.wires.length; i++) {
-      this.drawWire(layout.wires[i], this.wireSignal.get(i) ?? 2, compById);
+      this.drawWire(layout.wires[i], this.wireSignal.get(i) ?? 2, compById, i);
     }
 
     // Components.
@@ -247,16 +320,13 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   }
 
   /**
-   * Stamp a small unfilled circle at every source-side port and a small
-   * arrow head at every destination-side port. These visually anchor wire
-   * ends to the gates.
+   * Stamp markers at every wire's source and destination port. Themes can
+   * override the appearance via `theme.portMarker`; the default draws an
+   * unfilled circle on the source side and a filled arrowhead on the
+   * destination side, both colored to match the wire's signal.
    */
   private drawPortMarkers(compById: Map<number, PlacedComponent>): void {
     const { ctx, cell, layout, theme } = this;
-    const sourceR = cell * 0.18;
-    const arrowSize = cell * 0.32;
-    // Track which (compId, portName) pairs already have a marker drawn so
-    // we don't double-stamp when the same source feeds multiple wires.
     const stampedSources = new Set<string>();
     for (let wi = 0; wi < layout.wires.length; wi++) {
       const wire = layout.wires[wi];
@@ -267,49 +337,66 @@ export class CircCanvas<C extends string = ThemeColorKey> {
         : "wireUndefined";
       const wireColor = theme.colors[colorKey] ?? "#444";
 
-      // Source marker — small unfilled circle on the OUT side of the source box.
+      // Source marker — drawn at most once per (component, source).
+      const src = compById.get(wire.srcId);
       const srcKey = `${wire.srcId}`;
-      if (!stampedSources.has(srcKey)) {
-        const src = compById.get(wire.srcId);
-        if (src) {
+      if (src && !stampedSources.has(srcKey)) {
+        if (theme.portMarker) {
+          theme.portMarker({
+            ctx, theme: theme as CircTheme<string>, cell,
+            x: src.outPort.x, y: src.outPort.y,
+            signal: sig, side: "source",
+          });
+        } else {
           const cx = src.outPort.x * cell + cell / 2;
           const cy = src.outPort.y * cell + cell / 2;
           ctx.fillStyle = theme.colors["background"] ?? "#fff";
           ctx.strokeStyle = wireColor;
           ctx.lineWidth = Math.max(1, cell * 0.14);
           ctx.beginPath();
-          ctx.arc(cx, cy, sourceR, 0, Math.PI * 2);
+          ctx.arc(cx, cy, cell * 0.18, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         }
         stampedSources.add(srcKey);
       }
 
-      // Destination marker — arrowhead pointing at the destination port.
+      // Destination marker.
       const dst = compById.get(wire.dstId);
       if (!dst) continue;
       const slot = dst.inPorts.find((p) => portByteOf(p.portName) === wire.dstPort);
       if (!slot) continue;
-      const tipX = (slot.coord.x + 1) * cell;
-      const tipY = slot.coord.y * cell + cell / 2;
-      ctx.fillStyle = wireColor;
-      ctx.beginPath();
-      ctx.moveTo(tipX, tipY);
-      ctx.lineTo(tipX - arrowSize, tipY - arrowSize / 2);
-      ctx.lineTo(tipX - arrowSize, tipY + arrowSize / 2);
-      ctx.closePath();
-      ctx.fill();
+      if (theme.portMarker) {
+        theme.portMarker({
+          ctx, theme: theme as CircTheme<string>, cell,
+          x: slot.coord.x, y: slot.coord.y,
+          signal: sig, side: "destination",
+        });
+      } else {
+        const arrowSize = cell * 0.32;
+        const tipX = (slot.coord.x + 1) * cell;
+        const tipY = slot.coord.y * cell + cell / 2;
+        ctx.fillStyle = wireColor;
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(tipX - arrowSize, tipY - arrowSize / 2);
+        ctx.lineTo(tipX - arrowSize, tipY + arrowSize / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
   }
 
   private drawWire(
     wire: RoutedWire,
     signal: Signal,
-    compById: Map<number, PlacedComponent>
+    compById: Map<number, PlacedComponent>,
+    wireIdx: number
   ): void {
     const { ctx, cell, theme } = this;
+    const conflictTier = this.wireTier.get(wireIdx) ?? 0;
     if (theme.wire) {
-      theme.wire({ ctx, theme: theme as CircTheme<string>, cell, wire, signal });
+      theme.wire({ ctx, theme: theme as CircTheme<string>, cell, wire, signal, conflictTier });
       return;
     }
     const colorKey =

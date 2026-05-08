@@ -51,6 +51,14 @@ export interface WireDrawContext<C extends string = ThemeColorKey> {
   cell: number;
   wire: RoutedWire;
   signal: Signal;
+  /**
+   * Suggested vertical-bias TIER for parallel-horizontal separation.
+   * `0` = no conflict, draw on grid; `1+` = shift by N rows of sub-cell
+   * offset to keep distinct from other wires at the same y. Computed by
+   * the renderer from actual H-on-H overlaps, so themes can avoid bending
+   * wires that don't need it.
+   */
+  conflictTier: number;
 }
 
 export interface BackgroundContext<C extends string = ThemeColorKey> {
@@ -59,6 +67,18 @@ export interface BackgroundContext<C extends string = ThemeColorKey> {
   cell: number;
   width: number;
   height: number;
+}
+
+export interface PortMarkerContext<C extends string = ThemeColorKey> {
+  ctx: CanvasRenderingContext2D;
+  theme: CircTheme<C>;
+  cell: number;
+  /** Port location in CELL coordinates (cell-center is at (x+0.5, y+0.5)). */
+  x: number;
+  y: number;
+  signal: Signal;
+  /** "source" = wire-leaving end, "destination" = wire-arriving end. */
+  side: "source" | "destination";
 }
 
 export type Skin<C extends string = ThemeColorKey> = (
@@ -75,6 +95,13 @@ export interface CircTheme<C extends string = ThemeColorKey> {
   skins?: Partial<Record<ComponentKind | "subcircuit", Skin<C>>>;
   background?: (args: BackgroundContext<C>) => void;
   wire?: (args: WireDrawContext<C>) => void;
+  /**
+   * Override how port endpoints (the dots/arrows where wires meet boxes)
+   * are drawn. Called once per source port AFTER all wires + components
+   * are drawn, then once per destination port. If absent, the default
+   * unfilled-circle + filled-arrow pair is drawn.
+   */
+  portMarker?: (args: PortMarkerContext<C>) => void;
 }
 
 export const baseTheme: CircTheme = {
