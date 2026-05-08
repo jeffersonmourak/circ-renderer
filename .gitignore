@@ -24,3 +24,5 @@ data.json
 example/**
 
 lib/**
+
+.claude/**
