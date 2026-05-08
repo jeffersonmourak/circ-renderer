@@ -154,7 +154,9 @@ export function collapse(
     const dstPort = remappedPort(conn.port, conn.toId, dstVid, kindOf, nameOf);
     const srcPort = remappedPort(SRC_PORT_OUT, effectiveSource, srcVid, kindOf, nameOf);
 
-    nodeOutputs.get(srcVid)!.push({ dstId: dstVid, srcPort, dstPort });
+    nodeOutputs.get(srcVid)!.push({
+      dstId: dstVid, srcPort, dstPort, realSrcId: effectiveSource,
+    });
     nodeInputs.get(dstVid)!.push({ srcId: srcVid, srcPort, dstPort });
   }
 

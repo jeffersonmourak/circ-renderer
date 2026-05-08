@@ -18,6 +18,7 @@ interface PendingWire {
   srcPort: number;
   dstId: number;
   dstPort: number;
+  realSrcId: number;
   sx: number; sy: number;
   dx: number; dy: number;
   trackX: number;
@@ -72,6 +73,7 @@ export function route(
         srcPort: SRC_OUT,
         dstId: edge.dstId,
         dstPort: edge.dstPort,
+        realSrcId: edge.realSrcId,
         sx: srcP.outPort.x,
         sy: srcP.outPort.y,
         dx: dstCoord.x,
@@ -287,6 +289,7 @@ export function route(
     srcPort: w.srcPort,
     dstId: w.dstId,
     dstPort: w.dstPort,
+    realSrcId: w.realSrcId,
     segments: w.segments,
     crossings: crossings[i],
   }));

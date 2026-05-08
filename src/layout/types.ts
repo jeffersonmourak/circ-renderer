@@ -18,6 +18,13 @@ export interface OutputEdge {
   dstId: number;
   srcPort: number;
   dstPort: number;
+  /**
+   * Un-collapsed driver of this edge: the primitive whose output actually
+   * feeds `dstId` in the original topology. Equals `srcId` when the source
+   * is a real component, or the inner gate that drives the subcircuit's
+   * output port when `srcId` is a synthetic collapsed-subcircuit node.
+   */
+  realSrcId: number;
 }
 
 export interface VirtualNode {
@@ -82,6 +89,8 @@ export interface RoutedWire {
   dstPort: number;
   segments: Segment[];
   crossings: PortCoord[];
+  /** See `OutputEdge.realSrcId`. */
+  realSrcId: number;
 }
 
 export interface LayoutGrid {

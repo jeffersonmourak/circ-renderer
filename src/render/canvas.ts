@@ -43,6 +43,14 @@ export class CircCanvas<C extends string = ThemeColorKey> {
    * that bend wires for visual separation only do so where it helps.
    */
   private wireTier = new Map<number, number>();
+  /**
+   * Map from a component id (real or synthetic subcircuit) to the real
+   * primitive that drives its outgoing wires. For real components this is
+   * the component itself; for collapsed subcircuits it's the inner gate
+   * that feeds the subcircuit's external connections. Lets the renderer
+   * read settled signals for synth nodes that aren't in the runtime.
+   */
+  private realDriverByComp = new Map<number, number>();
 
   constructor(
     private runtime: CircRuntime,
@@ -55,6 +63,11 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     this.ctx = ctx;
     this.resize();
     this.computeWireTiers();
+    for (const w of this.layout.wires) {
+      if (!this.realDriverByComp.has(w.srcId)) {
+        this.realDriverByComp.set(w.srcId, w.realSrcId);
+      }
+    }
     if (options.interactive ?? true) this.attach();
     this.refreshState();
   }
@@ -122,38 +135,16 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   /** Pull every component's current state from the WASM runtime. */
   refreshState(): void {
     this.signals = this.runtime.snapshot();
-    // Wire signal := source component's output state.
-    // For wires whose srcId is a synthetic subcircuit node (created by
-    // the collapse stage and therefore unknown to the runtime), trace
-    // back through the original topology to find the real underlying
-    // source: the component whose connection points at this wire's
-    // (dstId, dstPort) in the un-collapsed graph.
+    // Wire signal := real driver's output. `realSrcId` is set during the
+    // collapse stage and points at the un-collapsed primitive that feeds
+    // the edge — for real sources it equals srcId, for collapsed
+    // subcircuits it's the inner gate, so the lookup is uniform.
     this.wireSignal.clear();
-    const realComponentIds = new Set(this.runtime.topology.components.map((c) => c.id));
     for (let i = 0; i < this.layout.wires.length; i++) {
       const w = this.layout.wires[i];
-      let sig = this.signals.get(w.srcId);
-      if (sig === undefined && !realComponentIds.has(w.srcId)) {
-        const realSrcId = this.findRealSourceForWire(w.dstId, w.dstPort);
-        if (realSrcId !== undefined) sig = this.signals.get(realSrcId);
-      }
-      this.wireSignal.set(i, sig ?? 2);
+      this.wireSignal.set(i, this.signals.get(w.realSrcId) ?? 2);
     }
     this.draw();
-  }
-
-  /**
-   * Walk the un-collapsed topology connections to find the component that
-   * actually drives `(dstId, dstPort)`. Used when a wire's `srcId` is a
-   * synthetic subcircuit node — the real driver is whatever fed that
-   * port in the original graph before the collapse stage rewrote the
-   * edge to come from the synthetic id.
-   */
-  private findRealSourceForWire(dstId: number, dstPort: number): number | undefined {
-    for (const conn of this.runtime.topology.connections) {
-      if (conn.toId === dstId && conn.port === dstPort) return conn.fromId;
-    }
-    return undefined;
   }
 
   destroy(): void {
@@ -256,7 +247,11 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
     // Components.
     for (const comp of layout.components) {
-      const out = this.signals.get(comp.id) ?? 2;
+      // Synthetic subcircuit nodes aren't in the runtime snapshot — fall
+      // back to the inner gate that drives this group's outputs so the
+      // box's output tail/dot match the wires leaving it.
+      const driver = this.realDriverByComp.get(comp.id) ?? comp.id;
+      const out = this.signals.get(driver) ?? 2;
       const ins = comp.inPorts.map((slot) => {
         const wireIdx = layout.wires.findIndex((w) => w.dstId === comp.id && portByteOf(slot.portName) === w.dstPort);
         return wireIdx >= 0 ? this.wireSignal.get(wireIdx) ?? 2 : (2 as Signal);
@@ -294,7 +289,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       if (!arr) { arr = []; bySrc.set(w.srcId, arr); }
       arr.push(w);
     }
-    for (const [srcId, group] of bySrc) {
+    for (const [, group] of bySrc) {
       if (group.length < 2) continue; // single wire can't fan out
       const counts = new Map<string, number>();
       for (const w of group) {
@@ -308,8 +303,9 @@ export class CircCanvas<C extends string = ThemeColorKey> {
           }
         }
       }
-      // Pick the wire-color for this source.
-      const sig = this.signals.get(srcId) ?? 2;
+      // All wires in a fan-out group share a real driver, so any of them
+      // works for picking the dot color.
+      const sig = this.signals.get(group[0].realSrcId) ?? 2;
       const colorKey =
         styleForSignal(sig) === "active" ? "wireActive"
         : styleForSignal(sig) === "idle" ? "wireIdle"
