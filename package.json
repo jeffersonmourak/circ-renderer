@@ -1,13 +1,17 @@
 {
   "name": "circ-renderer",
-  "version": "1.2.1",
-  "description": "\"Logisim Circ file render and pseudo-simulator.",
-  "main": "src",
+  "version": "2.0.0-alpha.1",
+  "description": "Render and simulate compiled circ-renderer-z WASM artifacts in the browser.",
+  "main": "src/index.ts",
   "module": "src/index.ts",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jeffersonmourak/circ-renderer.git"
+  },
+  "scripts": {
+    "dev": "bun run example/index.tsx",
+    "typecheck": "tsc --noEmit"
   },
   "author": "Jefferson Oliveira <jeffersonmourak@gmail.com>",
   "license": "CC-BY-4.0",
@@ -16,21 +20,10 @@
   },
   "homepage": "https://github.com/jeffersonmourak/circ-renderer#readme",
   "devDependencies": {
-    "@types/lodash": "^4.17.13",
     "@types/bun": "latest",
-    "@typescript-eslint/eslint-plugin": "5.29.0",
-    "@typescript-eslint/parser": "5.29.0",
-    "builtin-modules": "3.3.0",
-    "tslib": "2.4.0",
     "typescript": "^5.6.3"
   },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "dependencies": {
-    "@codemirror/language": "^6.10.6",
-    "fast-xml-parser": "^5.2.3",
-    "lodash": "^4.17.21",
-    "uuid": "^11.0.3"
   }
 }
