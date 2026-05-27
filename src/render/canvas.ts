@@ -1,14 +1,23 @@
 import { buildLayout, type LayoutGrid, type LayoutOptions, type PlacedComponent, type RoutedWire } from "../layout";
 import { isPrimitive } from "../layout/types";
-import { ComponentKind, type Signal } from "../wasm/topology";
+import { type BitValue, ComponentKind, type Signal, signalOf, undefinedValue, widthMask } from "../wasm/topology";
 import type { CircRuntime } from "../wasm/runtime";
 import {
   baseTheme,
   type CircTheme,
-  styleForSignal,
   type ThemeColorKey,
+  wireColorKey,
+  wireStyleOf,
 } from "../utils/theme";
 import { pickSkin } from "./skins";
+
+/** Format a bus value as a fixed-width hex badge; `?` if any bit is unknown. */
+function formatBus(v: BitValue): string {
+  const mask = widthMask(v.width);
+  if ((v.defined & mask) !== mask) return "?";
+  const digits = Math.ceil(v.width / 4);
+  return "0x" + (v.value & mask).toString(16).toUpperCase().padStart(digits, "0");
+}
 
 export interface RenderOptions<C extends string = ThemeColorKey> {
   /** Pixel width of one layout cell. Default 12. */
@@ -29,13 +38,13 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private layout: LayoutGrid;
-  private signals = new Map<number, Signal>();
+  private signals = new Map<number, BitValue>();
   private inputState = new Map<number, Signal>();
   private hoverId: number | null = null;
   private listeners: Array<() => void> = [];
 
-  /** Per-wire signal (snapshot of source's output). Recomputed on refresh. */
-  private wireSignal = new Map<number, Signal>();
+  /** Per-wire value (snapshot of source's output). Recomputed on refresh. */
+  private wireValue = new Map<number, BitValue>();
   /**
    * Per-wire conflict tier for theme-driven sub-cell bias. 0 = no
    * horizontal-on-horizontal collision; 1+ = collides with a wire from
@@ -135,14 +144,14 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   /** Pull every component's current state from the WASM runtime. */
   refreshState(): void {
     this.signals = this.runtime.snapshot();
-    // Wire signal := real driver's output. `realSrcId` is set during the
+    // Wire value := real driver's output. `realSrcId` is set during the
     // collapse stage and points at the un-collapsed primitive that feeds
     // the edge — for real sources it equals srcId, for collapsed
     // subcircuits it's the inner gate, so the lookup is uniform.
-    this.wireSignal.clear();
+    this.wireValue.clear();
     for (let i = 0; i < this.layout.wires.length; i++) {
       const w = this.layout.wires[i];
-      this.wireSignal.set(i, this.signals.get(w.realSrcId) ?? 2);
+      this.wireValue.set(i, this.signals.get(w.realSrcId) ?? undefinedValue(1));
     }
     this.draw();
   }
@@ -242,7 +251,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     // extend INTO the source/destination boxes so the wire visually meets
     // the gate edge. The component fills paint over the inside parts.
     for (let i = 0; i < layout.wires.length; i++) {
-      this.drawWire(layout.wires[i], this.wireSignal.get(i) ?? 2, compById, i);
+      this.drawWire(layout.wires[i], this.wireValue.get(i) ?? undefinedValue(1), compById, i);
     }
 
     // Components.
@@ -251,28 +260,53 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       // back to the inner gate that drives this group's outputs so the
       // box's output tail/dot match the wires leaving it.
       const driver = this.realDriverByComp.get(comp.id) ?? comp.id;
-      const out = this.signals.get(driver) ?? 2;
-      const ins = comp.inPorts.map((slot) => {
+      const outValue = this.signals.get(driver) ?? undefinedValue(comp.bitWidth);
+      const inValues = comp.inPorts.map((slot) => {
         const wireIdx = layout.wires.findIndex((w) => w.dstId === comp.id && portByteOf(slot.portName) === w.dstPort);
-        return wireIdx >= 0 ? this.wireSignal.get(wireIdx) ?? 2 : (2 as Signal);
+        return wireIdx >= 0 ? this.wireValue.get(wireIdx) ?? undefinedValue(1) : undefinedValue(1);
       });
-      const skin = pickSkin(theme as CircTheme<string>, {
+      const skinArgs = {
         ctx, theme: theme as CircTheme<string>, cell, component: comp,
-        inputSignals: ins,
-        outputSignal: out,
+        inputSignals: inValues.map(signalOf),
+        outputSignal: signalOf(outValue),
+        inputValues: inValues,
+        outputValue: outValue,
         hovered: this.hoverId === comp.id,
-      });
-      skin({
-        ctx, theme: theme as CircTheme<string>, cell, component: comp,
-        inputSignals: ins,
-        outputSignal: out,
-        hovered: this.hoverId === comp.id,
-      });
+      };
+      const skin = pickSkin(theme as CircTheme<string>, skinArgs);
+      skin(skinArgs);
     }
 
     // Markers on top: fan-out dots, port markers (out circle, in arrow).
     this.drawFanOutMarkers(compById);
     this.drawPortMarkers(compById);
+    // Bus value badges for multi-bit nets, above everything.
+    this.drawBusValues();
+  }
+
+  /**
+   * Label every multi-bit (width > 1) component's output net with its current
+   * value, drawn just above the box. Input pins show their driven value;
+   * output pins / LEDs show what they receive; gates and bit-shape nodes show
+   * their computed output.
+   */
+  private drawBusValues(): void {
+    const { ctx, cell, layout, theme } = this;
+    ctx.save();
+    ctx.font = (theme.font ?? `${Math.round(cell)}px ui-monospace, monospace`);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = theme.colors["busLabel"] ?? "#1971c2";
+    for (const comp of layout.components) {
+      if (comp.bitWidth <= 1) continue;
+      const driver = this.realDriverByComp.get(comp.id) ?? comp.id;
+      const v = this.signals.get(driver) ?? undefinedValue(comp.bitWidth);
+      const text = formatBus({ ...v, width: comp.bitWidth });
+      const cx = (comp.x + comp.width / 2) * cell;
+      const cy = comp.y * cell - cell * 0.15;
+      ctx.fillText(text, cx, cy);
+    }
+    ctx.restore();
   }
 
   /**
@@ -305,12 +339,8 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       }
       // All wires in a fan-out group share a real driver, so any of them
       // works for picking the dot color.
-      const sig = this.signals.get(group[0].realSrcId) ?? 2;
-      const colorKey =
-        styleForSignal(sig) === "active" ? "wireActive"
-        : styleForSignal(sig) === "idle" ? "wireIdle"
-        : "wireUndefined";
-      ctx.fillStyle = theme.colors[colorKey] ?? "#444";
+      const v = this.signals.get(group[0].realSrcId) ?? undefinedValue(1);
+      ctx.fillStyle = theme.colors[wireColorKey(wireStyleOf(v))] ?? "#444";
       for (const [key, n] of counts) {
         if (n < 3) continue;
         const [xs, ys] = key.split(",");
@@ -334,12 +364,9 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     const stampedSources = new Set<string>();
     for (let wi = 0; wi < layout.wires.length; wi++) {
       const wire = layout.wires[wi];
-      const sig = this.wireSignal.get(wi) ?? 2;
-      const colorKey =
-        styleForSignal(sig) === "active" ? "wireActive"
-        : styleForSignal(sig) === "idle" ? "wireIdle"
-        : "wireUndefined";
-      const wireColor = theme.colors[colorKey] ?? "#444";
+      const value = this.wireValue.get(wi) ?? undefinedValue(1);
+      const sig = signalOf(value);
+      const wireColor = theme.colors[wireColorKey(wireStyleOf(value))] ?? "#444";
 
       // Source marker — drawn at most once per (component, source).
       const src = compById.get(wire.srcId);
@@ -393,22 +420,20 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
   private drawWire(
     wire: RoutedWire,
-    signal: Signal,
+    value: BitValue,
     compById: Map<number, PlacedComponent>,
     wireIdx: number
   ): void {
     const { ctx, cell, theme } = this;
     const conflictTier = this.wireTier.get(wireIdx) ?? 0;
+    const style = wireStyleOf(value);
     if (theme.wire) {
-      theme.wire({ ctx, theme: theme as CircTheme<string>, cell, wire, signal, conflictTier });
+      theme.wire({ ctx, theme: theme as CircTheme<string>, cell, wire, signal: signalOf(value), value, conflictTier });
       return;
     }
-    const colorKey =
-      styleForSignal(signal) === "active" ? "wireActive"
-      : styleForSignal(signal) === "idle" ? "wireIdle"
-      : "wireUndefined";
-    ctx.strokeStyle = theme.colors[colorKey] ?? "#444";
-    ctx.lineWidth = Math.max(1, cell * 0.18);
+    ctx.strokeStyle = theme.colors[wireColorKey(style)] ?? "#444";
+    // Buses (width > 1) draw a touch heavier so they read as multi-bit.
+    ctx.lineWidth = Math.max(1, cell * (style === "bus" ? 0.28 : 0.18));
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     // Source-side stub: from the source box's right edge into the out_port.
@@ -477,6 +502,12 @@ function portByteOf(name: string): number {
     case "a":  return 1;
     case "b":  return 2;
     case "out": return 3;
-    default: return 0xff;
+    default:
+      // Concat operand ports are `op<index>`; the index IS the port byte.
+      if (name.startsWith("op")) {
+        const idx = Number(name.slice(2));
+        if (Number.isInteger(idx)) return idx;
+      }
+      return 0xff;
   }
 }

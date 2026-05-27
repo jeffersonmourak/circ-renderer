@@ -164,6 +164,26 @@ const drawLed: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, inputSignal
   }
 };
 
+const drawSlice: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+  boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, outputSignal);
+  const { lo, hi } = component.slice ?? { lo: 0, hi: 1 };
+  const label = hi - lo <= 1 ? `[${lo}]` : `[${lo}:${hi}]`;
+  drawLabel(
+    ctx, theme, cell, label,
+    (component.x + component.width / 2) * cell,
+    (component.y + component.height / 2) * cell
+  );
+};
+
+const drawConcat: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+  boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, outputSignal);
+  drawLabel(
+    ctx, theme, cell, "{·}",
+    (component.x + component.width / 2) * cell,
+    (component.y + component.height / 2) * cell
+  );
+};
+
 const drawSubcircuit: Skin<ThemeColorKey> = ({ ctx, theme, cell, component }) => {
   const x0 = component.x * cell;
   const y0 = component.y * cell;
@@ -197,6 +217,8 @@ export const defaultSkins: Required<NonNullable<CircTheme<ThemeColorKey>["skins"
   [ComponentKind.AndGate]: drawAnd,
   [ComponentKind.Led]: drawLed,
   [ComponentKind.Wire]: () => {}, // wires are collapsed; never drawn as a component
+  [ComponentKind.Slice]: drawSlice,
+  [ComponentKind.Concat]: drawConcat,
   subcircuit: drawSubcircuit,
 };
 

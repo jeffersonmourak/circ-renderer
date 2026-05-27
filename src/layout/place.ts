@@ -1,5 +1,5 @@
 import { ComponentKind, PortName } from "../wasm/topology";
-import { macroSize, pinSize, primitiveSizing, type PrimitiveSize } from "./sizing";
+import { concatSize, macroSize, pinSize, primitiveSizing, sliceSize, type PrimitiveSize } from "./sizing";
 import {
   type ColumnAssignment,
   isPrimitive,
@@ -76,6 +76,8 @@ export function place(
       height: h,
       inPorts: ports.inPorts,
       outPort: ports.outPort,
+      bitWidth: node.bitWidth,
+      slice: node.slice,
     };
   }
   return placed;
@@ -87,6 +89,13 @@ function sizeOf(node: VirtualNode): PrimitiveSize {
     if (k === ComponentKind.InputPin || k === ComponentKind.OutputPin) {
       return pinSize(node.name.length);
     }
+    if (k === ComponentKind.Slice) {
+      const { lo, hi } = node.slice ?? { lo: 0, hi: 1 };
+      return sliceSize(lo, hi);
+    }
+    if (k === ComponentKind.Concat) {
+      return concatSize(operandCount(node));
+    }
     return primitiveSizing[k];
   }
   // subcircuit
@@ -95,6 +104,16 @@ function sizeOf(node: VirtualNode): PrimitiveSize {
     countActiveSubcircuitInputs(node)
   );
 }
+
+/** Number of distinct operand ports feeding a concat node. */
+function operandCount(node: VirtualNode): number {
+  const seen = new Set<number>();
+  for (const e of node.inputs) seen.add(e.dstPort);
+  return Math.max(1, seen.size);
+}
+
+/** Port-slot label for concat operand `index`. Decoded by `portByteOf`. */
+export const operandPortName = (index: number): string => `op${index}`;
 
 function countActiveSubcircuitInputs(node: VirtualNode): number {
   let hasIn = false, hasA = false, hasB = false;
@@ -136,6 +155,21 @@ function resolvePortCoords(node: VirtualNode, x: number, y: number, w: number, h
       case ComponentKind.Led:
         inPorts.push({ portName: "in", coord: { x: sat(x - 1), y: y + 1 } });
         break;
+      case ComponentKind.Slice:
+        inPorts.push({ portName: "in", coord: { x: sat(x - 1), y: y + 1 } });
+        outPort = { x: x + w, y: y + 1 };
+        break;
+      case ComponentKind.Concat: {
+        // One stacked input port per operand index, ascending. Port labels
+        // are `op<index>` so the canvas can match them to the operand-index
+        // port bytes carried on concat connections.
+        const indices = Array.from(new Set(node.inputs.map((e) => e.dstPort))).sort((a, b) => a - b);
+        indices.forEach((idx, slotIdx) => {
+          inPorts.push({ portName: operandPortName(idx), coord: { x: sat(x - 1), y: y + 1 + 2 * slotIdx } });
+        });
+        outPort = { x: x + w, y: y + Math.floor(h / 2) };
+        break;
+      }
       case ComponentKind.Wire:
         // wires were collapsed in stage 1
         break;

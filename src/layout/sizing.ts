@@ -17,7 +17,28 @@ export const primitiveSizing: Record<ComponentKind, PrimitiveSize> = {
   [ComponentKind.AndGate]: { width: 5, height: 5 },
   [ComponentKind.Wire]: { width: 0, height: 0 },
   [ComponentKind.OutputPin]: { width: 0, height: 0 },
+  // Bit-shape kinds; concat grows with operand count via `concatSize`.
+  [ComponentKind.Slice]: { width: 5, height: 3 },
+  [ComponentKind.Concat]: { width: 5, height: 3 },
 };
+
+/**
+ * Slice tap box. Width fits the `[lo:hi]` label (or `[i]` for a single bit)
+ * with one cell of padding each side; floor at 5.
+ */
+export function sliceSize(lo: number, hi: number): PrimitiveSize {
+  const label = hi - lo <= 1 ? `[${lo}]` : `[${lo}:${hi}]`;
+  return { width: Math.max(5, label.length + 2), height: 3 };
+}
+
+/**
+ * Concat merge box. One input port per operand, stacked vertically, so the
+ * height grows with operand count the same way the subcircuit box does.
+ */
+export function concatSize(operandCount: number): PrimitiveSize {
+  const n = Math.max(1, operandCount);
+  return { width: 5, height: n <= 1 ? 3 : 2 * n + 1 };
+}
 
 /**
  * Pin (input or output) box. Width grows with the label name to keep it

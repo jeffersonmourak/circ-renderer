@@ -34,6 +34,10 @@ export interface VirtualNode {
   origin: OriginFrame[];
   inputs: InputEdge[];
   outputs: OutputEdge[];
+  /** Bit width of this node's output net (1..64). 1 for collapsed boxes. */
+  bitWidth: number;
+  /** Bit range for `Slice` nodes, threaded from the topology aux. */
+  slice?: { lo: number; hi: number };
 }
 
 export interface VirtualGraph {
@@ -71,10 +75,15 @@ export interface PlacedComponent {
   origin: OriginFrame[];
   x: number;
   y: number;
+  /** Box width in layout CELLS (not bits). */
   width: number;
   height: number;
   inPorts: PortSlot[];
   outPort: PortCoord;
+  /** Bit width of this component's output net (1..64). */
+  bitWidth: number;
+  /** Bit range for `Slice` components. */
+  slice?: { lo: number; hi: number };
 }
 
 export interface Segment {
