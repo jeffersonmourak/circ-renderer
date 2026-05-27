@@ -23,6 +23,8 @@ document.body.appendChild(view.canvas);
 
 When the user clicks an input pin the lib calls `setPin` + `run` on the WASM, snapshots the new state, and re-renders.
 
+Multi-bit nets (buses, widths 1–64) are supported: bus wires render heavier in the `wireBus` color and carry a hex value badge above each component. The runtime reads values as width-aware `BitValue`s (`{ value, defined, width }`, the masks are `bigint`); single-bit nets collapse to the usual idle/active/undefined coloring.
+
 ## API
 
 ### `renderCircuit(opts) → Promise<CircView>`
@@ -101,9 +103,11 @@ await renderCircuit({ url: "/static/foo.wasm", theme });
 | `fillIdle`       | gate body when its output is `0`              |
 | `fillActive`     | gate body / LED ring when output is `1`       |
 | `fillUndefined`  | gate body when output is undefined            |
-| `wireIdle`       | wire showing a `0` signal                     |
-| `wireActive`     | wire showing a `1` signal                     |
+| `wireIdle`       | width-1 wire showing a `0` signal             |
+| `wireActive`     | width-1 wire showing a `1` signal             |
 | `wireUndefined`  | wire showing an undefined signal              |
+| `wireBus`        | multi-bit (width > 1) wire with a defined value |
+| `busLabel`       | text color of bus value badges (e.g. `0x0F`)  |
 | `label`          | text on gates                                 |
 | `labelMuted`     | reserved for secondary labels                 |
 | `macro`          | subcircuit (collapsed) box border             |
@@ -117,23 +121,33 @@ type Skin = (ctx: {
   ctx: CanvasRenderingContext2D;
   theme: CircTheme;
   cell: number;
-  component: PlacedComponent;     // x, y, width, height in CELLS, not pixels
-  inputSignals: Signal[];          // one per in_port, in declaration order
+  component: PlacedComponent;     // x, y, width, height in CELLS, not pixels;
+                                  // plus bitWidth and (for slices) slice {lo,hi}
+  inputSignals: Signal[];          // collapsed tri-state, one per in_port
   outputSignal: Signal;            // 0 | 1 | 2
+  inputValues: BitValue[];         // width-aware value per in_port
+  outputValue: BitValue;           // { value, defined, width }, masks are bigint
   hovered: boolean;
 }) => void;
 ```
 
-Multiply cell-space numbers by `cell` to get pixels. The default skins live in `src/render/skins.ts` if you want to copy a starting point.
+Multiply cell-space numbers by `cell` to get pixels. Use `outputValue`/`inputValues` for width-aware (bus) rendering and `outputSignal`/`inputSignals` for simple tri-state coloring. The default skins live in `src/render/skins.ts` if you want to copy a starting point.
 
 ## How it gets the topology
 
 The compiled `.wasm` carries two custom sections produced by `circ-compile`:
 
-- **`circ.topology.v0.min`** (magic `CIRC`) — the lightweight payload the *runtime* parses (`id`, `kind`, connections). Boot path: `topology_alloc(size) → memcpy → init()`.
-- **`circ.topology.v0.full`** (magic `CIRF`) — the rich payload the *renderer* parses (adds `name`, origin chain). Decoded directly from the module bytes; no extra fetch.
+- **`circ.topology.v0.min`** (magic `CIRC`) — the lightweight payload the *runtime* parses (`id`, `kind`, `width`, connections). Boot path: `topology_alloc(size) → memcpy → init()`.
+- **`circ.topology.v0.full`** (magic `CIRF`) — the rich payload the *renderer* parses (adds `name`, `width`, origin chain, and slice `[lo, hi)` aux). Decoded directly from the module bytes; no extra fetch.
 
-The simulation runtime exports `topology_alloc / init / run / setPin / getOutputState`. Component IDs are the same across both sections and the runtime.
+The decoder accepts **CIRF v0x01 and v0x02**. v02 added a per-component `width` byte and the slice aux suffix; v01 payloads (pre-2.0 artifacts) decode with width defaulted to 1 and no `slice`/`concat` kinds.
+
+The simulation runtime is driven through one of two export ABIs, detected automatically:
+
+- **v2** (current): `topology_alloc / init / run / setPin(id, value, defined) / getOutputValue(id) / getOutputDefined(id)`, with the `BitVecState` halves crossing as `i64`/`BigInt`.
+- **v1** (pre-2.0 artifacts): `topology_alloc / init / run / setPin(id, state) / getOutputState(id)`, scalar tri-state, width-1 only.
+
+`CircRuntime` exposes the width-aware surface (`setValue`/`readValue`/`snapshot`) over both, plus `setPinSignal`/`getOutputState` convenience wrappers. Component IDs are the same across both sections and the runtime.
 
 ## Example
 
@@ -146,3 +160,12 @@ bun run dev
 ```
 
 `example/static/*.wasm` are pre-compiled fixtures from `circ-compiler` (`circ-compile path/to.circ -o foo.wasm`).
+
+## Tests
+
+```bash
+bun test        # decode (v01 + v02), runtime ABI, and layout tests
+bun run typecheck
+```
+
+`test/fixtures/` holds compiled `.wasm` fixtures: current v02 artifacts plus a frozen `and_v01.wasm` that guards the v01 decode + scalar-ABI fallback path.

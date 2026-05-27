@@ -37,7 +37,7 @@ for (const w of layout.wires) {
 // Drive every input pin high, settle, read.
 const pins = rt.topology.components.filter((c) => c.kind === ComponentKind.InputPin);
 console.log(`\nall HIGH:`);
-for (const p of pins) rt.setPin(p.id, 1);
+for (const p of pins) rt.setPinSignal(p.id, 1);
 rt.run();
 for (const c of rt.topology.components) {
   console.log(`  ${c.id} ${c.name} = ${rt.getOutputState(c.id)}`);
@@ -45,7 +45,7 @@ for (const c of rt.topology.components) {
 
 if (pins.length >= 2) {
   console.log(`\nfirst LOW, rest HIGH:`);
-  rt.setPin(pins[0].id, 0);
+  rt.setPinSignal(pins[0].id, 0);
   rt.run();
   for (const c of rt.topology.components) {
     console.log(`  ${c.id} ${c.name} = ${rt.getOutputState(c.id)}`);

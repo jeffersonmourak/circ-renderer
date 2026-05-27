@@ -42,6 +42,8 @@ export {
   baseTheme,
   defaultColors,
   styleForSignal,
+  wireStyleOf,
+  wireColorKey,
   type CircTheme,
   type ThemeColorKey,
   type Skin,
@@ -50,6 +52,7 @@ export {
   type BackgroundContext,
   type PortMarkerContext,
   type SignalStyle,
+  type WireStyle,
 } from "./utils/theme";
 
 export { defaultSkins } from "./render/skins";

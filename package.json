@@ -11,7 +11,8 @@
   },
   "scripts": {
     "dev": "bun run example/index.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "author": "Jefferson Oliveira <jeffersonmourak@gmail.com>",
   "license": "CC-BY-4.0",

@@ -1,8 +1,12 @@
 import {
   ComponentKind,
   decodeFullTopology,
+  type BitValue,
+  type FullComponent,
   type FullTopology,
   type Signal,
+  signalOf,
+  widthMask,
 } from "./topology";
 
 /**
@@ -11,7 +15,21 @@ import {
  * linear memory via `topology_alloc` + memcpy, then calls `init()`. The
  * runtime parses it from there. Other lifecycle exports (`reset`,
  * `deinit`, …) are looked up best-effort — they may not exist yet.
+ *
+ * Two ABIs are supported, detected by which exports the module carries:
+ *
+ *  - **v2 (BitVecState)**, current compiler: `setPin(id, value, defined)` with
+ *    the two halves crossing as i64 (`bigint` here), and paired
+ *    `getOutputValue` / `getOutputDefined` getters.
+ *  - **v1 (scalar)**, pre-2.0 artifacts: `setPin(id, state)` and a single
+ *    `getOutputState(id)` returning a tri-state `0|1|2`. Width-1 only.
+ *
+ * Callers always use the width-aware `BitValue` surface; the v1 path adapts
+ * to/from the scalar export transparently. The CIRF section version and the
+ * runtime ABI are produced together, so they always agree.
  */
+type RuntimeAbi = "v1" | "v2";
+
 interface RuntimeExports {
   memory: WebAssembly.Memory;
   /** Allocate `size` bytes in linear memory; returns a pointer the host
@@ -19,8 +37,13 @@ interface RuntimeExports {
   topology_alloc: (size: number) => number;
   init: () => void;
   run: () => void;
-  setPin: (componentId: number, state: number) => void;
-  getOutputState: (componentId: number) => number;
+  /** v2: (id, value:i64, defined:i64). v1: (id, state:i32). */
+  setPin: (componentId: number, a?: number | bigint, b?: bigint) => void;
+  // v2 ABI:
+  getOutputValue?: (componentId: number) => bigint;
+  getOutputDefined?: (componentId: number) => bigint;
+  // v1 ABI:
+  getOutputState?: (componentId: number) => number;
   // Optional / future:
   reset?: () => void;
   deinit?: () => void;
@@ -72,13 +95,16 @@ export class CircRuntime {
   /** Raw WASM module bytes — kept so we can re-extract the topology section. */
   private rawBytes: Uint8Array;
   private _topology: FullTopology;
+  /** id → component, for width lookups when reading/driving by id. */
+  private byId: Map<number, FullComponent>;
+  /** Which export ABI this module exposes (detected at construction). */
+  private abi: RuntimeAbi;
   /**
-   * JS-side mirror of every `setPin` call. We keep this so wire/component
-   * colors stay correct for input pins even if the WASM runtime doesn't
-   * surface their state through `getOutputState` (today's emitter only
-   * gates that read for declared output_pins).
+   * JS-side mirror of every `setPin` call. Kept so input-pin colors stay
+   * correct even if the runtime returns undefined for a pin we've driven
+   * (defensive — the current runtime echoes driven pins back).
    */
-  private localPinStates = new Map<number, Signal>();
+  private localPinStates = new Map<number, BitValue>();
 
   constructor(
     instance: WebAssembly.Instance,
@@ -88,6 +114,17 @@ export class CircRuntime {
     this.exports = instance.exports as unknown as RuntimeExports;
     this.rawBytes = rawBytes;
     this._topology = topology;
+    this.byId = new Map(topology.components.map((c) => [c.id, c]));
+    this.abi =
+      typeof this.exports.getOutputValue === "function" &&
+      typeof this.exports.getOutputDefined === "function"
+        ? "v2"
+        : "v1";
+  }
+
+  /** Bit width of a component (1 if unknown). */
+  private widthOf(componentId: number): number {
+    return this.byId.get(componentId)?.width ?? 1;
   }
 
   static async loadFromUrl(url: string, opts: LoadOptions = {}): Promise<CircRuntime> {
@@ -150,7 +187,7 @@ export class CircRuntime {
     // every input once before the first interaction propagates.
     if (!opts.noAutoInit && !opts.noInitialPinDrive) {
       for (const c of topology.components) {
-        if (c.kind === ComponentKind.InputPin) rt.setPin(c.id, 0);
+        if (c.kind === ComponentKind.InputPin) rt.setPinSignal(c.id, 0);
       }
       rt.run();
     }
@@ -172,42 +209,96 @@ export class CircRuntime {
     this.exports.reset?.();
   }
 
-  /** Drive an input pin. Caller must `run()` afterwards. */
-  setPin(componentId: number, state: Signal): void {
-    this.localPinStates.set(componentId, state);
-    this.exports.setPin(componentId, state);
+  /**
+   * Drive an input pin with a full width-aware value. `value`/`defined` are
+   * masked to the pin's width before crossing the boundary. Caller must
+   * `run()` afterwards (or use `setValueAndRun`).
+   */
+  setValue(componentId: number, value: bigint, defined: bigint): void {
+    const width = this.widthOf(componentId);
+    const mask = widthMask(width);
+    const v = value & mask;
+    const d = defined & mask;
+    this.localPinStates.set(componentId, { value: v, defined: d, width });
+    if (this.abi === "v2") {
+      this.exports.setPin(componentId, v, d);
+    } else {
+      // v1 scalar ABI: collapse to a tri-state (width-1 only).
+      this.exports.setPin(componentId, signalOf({ value: v, defined: d, width }));
+    }
   }
 
   /**
-   * Read the current settled output of a component. The runtime returns
-   * real values for every primitive (pins, gates, output pins). The
-   * JS-mirrored input-pin state is only consulted as a defensive
-   * fallback when the runtime returns `undefined` for a pin we've driven.
+   * Drive an input pin from a single tri-state level, applied to every bit:
+   * High → all-ones (fully defined), Low → all-zeros (fully defined),
+   * Undefined → fully undefined. Convenient for click-to-toggle UIs.
    */
-  getOutputState(componentId: number): Signal {
-    const v = this.exports.getOutputState(componentId);
-    const sig = ((v === 0 || v === 1 || v === 2) ? v : 2) as Signal;
-    if (sig === 2) {
-      const fallback = this.localPinStates.get(componentId);
-      if (fallback !== undefined) return fallback;
-    }
-    return sig;
+  setPinSignal(componentId: number, state: Signal): void {
+    const mask = widthMask(this.widthOf(componentId));
+    if (state === 2) this.setValue(componentId, 0n, 0n);
+    else this.setValue(componentId, state === 1 ? mask : 0n, mask);
   }
 
-  /** Drive an input pin and immediately settle. Convenience for UI events. */
+  /**
+   * Read the current settled value of a component as a width-aware
+   * `BitValue`. Pairs the two boundary getters with the component's width.
+   * Falls back to the JS-mirrored input-pin value if the runtime reports a
+   * driven pin as fully undefined (defensive).
+   */
+  readValue(componentId: number): BitValue {
+    const width = this.widthOf(componentId);
+    const mask = widthMask(width);
+    let bv: BitValue;
+    if (this.abi === "v2") {
+      const value = BigInt.asUintN(64, this.exports.getOutputValue!(componentId));
+      const defined = BigInt.asUintN(64, this.exports.getOutputDefined!(componentId));
+      bv = { value: value & mask, defined: defined & mask, width };
+    } else {
+      // v1 scalar ABI: 0/1 → defined bit, 2 → undefined (width-1).
+      const s = this.exports.getOutputState!(componentId);
+      bv = s === 2 ? { value: 0n, defined: 0n, width } : { value: BigInt(s & 1), defined: 1n, width };
+    }
+    if (bv.defined === 0n) {
+      const fallback = this.localPinStates.get(componentId);
+      if (fallback) return fallback;
+    }
+    return bv;
+  }
+
+  /** Collapsed single-bit view of a component's value (for coloring). */
+  getOutputState(componentId: number): Signal {
+    return signalOf(this.readValue(componentId));
+  }
+
+  /** Drive an input pin (tri-state) and immediately settle. */
   setPinAndRun(componentId: number, state: Signal): void {
-    this.setPin(componentId, state);
+    this.setPinSignal(componentId, state);
+    this.run();
+  }
+
+  /** Drive an input pin (full value) and immediately settle. */
+  setValueAndRun(componentId: number, value: bigint, defined: bigint): void {
+    this.setValue(componentId, value, defined);
     this.run();
   }
 
   /**
-   * Read the settled state for every component in the topology, including
-   * non-pin nodes — useful for the renderer to pick wire colors per signal.
+   * Read the settled value for every component in the topology, including
+   * non-pin nodes — the renderer uses this to color wires and label buses.
    */
-  snapshot(): Map<number, Signal> {
+  snapshot(): Map<number, BitValue> {
+    const out = new Map<number, BitValue>();
+    for (const c of this._topology.components) {
+      out.set(c.id, this.readValue(c.id));
+    }
+    return out;
+  }
+
+  /** Collapsed single-bit snapshot, for callers that only need tri-state. */
+  signalSnapshot(): Map<number, Signal> {
     const out = new Map<number, Signal>();
     for (const c of this._topology.components) {
-      out.set(c.id, this.getOutputState(c.id));
+      out.set(c.id, signalOf(this.readValue(c.id)));
     }
     return out;
   }

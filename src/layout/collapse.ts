@@ -173,6 +173,8 @@ export function collapse(
       origin: c.origin,
       inputs: nodeInputs.get(vid)!,
       outputs: nodeOutputs.get(vid)!,
+      bitWidth: c.width,
+      slice: c.slice,
     });
   }
   for (let i = 0; i < groupKeys.length; i++) {
@@ -185,6 +187,7 @@ export function collapse(
       origin: [],
       inputs: nodeInputs.get(vid)!,
       outputs: nodeOutputs.get(vid)!,
+      bitWidth: 1,
     });
   }
 
