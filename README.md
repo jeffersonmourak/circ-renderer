@@ -38,6 +38,7 @@ Multi-bit nets (buses, widths 1–64) are supported: bus wires render heavier in
 | `interactive`  | `boolean` (default true)            | enable pin clicks |
 | `layoutOptions`| `{ expandMacros?: boolean }`        | passed through to layout |
 | `onPinToggle`  | `(id, signal) => void`              | called after a click toggles an input pin; pair with `view.setInputSignal(id, signal)` to replay pins onto a rebuilt canvas |
+| `onHover`      | `(id \| null) => void`              | called when the pointer moves onto a different component box, and with `null` on leave; fires only on a change, so a host can drive an editor highlight straight from it |
 
 Returns `{ runtime, view, canvas, destroy() }`.
 
@@ -51,11 +52,18 @@ const layout  = buildLayout(runtime.topology);   // pure data, no DOM
 const view    = new CircCanvas(runtime, { cell: 14 });
 ```
 
+`CircCanvas` also exposes two host hooks:
+
+- `view.setHighlight(id | null)` highlights one component from outside the canvas — an editor cursor, a table header — through the same `hovered` flag the pointer drives, so a skin needs no second branch. `null` clears it, and an id with no box is a no-op.
+- `view.getLayout()` returns the `LayoutGrid` the canvas drew. A host needs it to map a declared name to a box: a collapsed subcircuit carries a synthetic id that exists only in the layout, never in `runtime.topology.components`.
+
 `buildLayout` is a pure function — useful if you want to skip Canvas and render the layout to SVG, React, or anything else. It runs the same five-stage pipeline (collapse → columns → rows → place → route) that the Zig CLI's `--preview` uses, ported to TypeScript.
 
 ## Theming
 
-A theme is a record of colors plus optional per-kind drawing functions. Defaults are tuned for a light blog page; supply your own to match your site.
+A theme is a record of colors plus optional per-kind drawing functions. A skin's
+`hovered` flag is true when the pointer is over that component **or** when the
+host highlighted it with `setHighlight`, so one branch covers both. Defaults are tuned for a light blog page; supply your own to match your site.
 
 ```ts
 import {

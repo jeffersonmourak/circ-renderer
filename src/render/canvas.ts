@@ -36,6 +36,16 @@ export interface RenderOptions<C extends string = ThemeColorKey> {
    * `setInputSignal` on the fresh instance.
    */
   onPinToggle?: (id: number, signal: Signal) => void;
+  /**
+   * Called when the pointer moves onto a different component box, and with
+   * `null` when it leaves the canvas. Fires only on a change, so a host can
+   * drive an editor highlight straight from it without debouncing.
+   *
+   * Ids are LAYOUT ids: a collapsed subcircuit box carries a synthetic id that
+   * does not exist in `runtime.topology.components`, so resolve it through
+   * `getLayout()` rather than through the topology.
+   */
+  onHover?: (id: number | null) => void;
 }
 
 const DEFAULTS = { cell: 12, padding: 4 };
@@ -47,6 +57,9 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   private signals = new Map<number, BitValue>();
   private inputState = new Map<number, Signal>();
   private hoverId: number | null = null;
+  /** Host-driven highlight, kept apart from `hoverId` so the canvas's own
+   *  pointer bookkeeping can never clobber it. */
+  private highlightId: number | null = null;
   private listeners: Array<() => void> = [];
 
   /** Per-wire value (snapshot of source's output). Recomputed on refresh. */
@@ -169,19 +182,8 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   }
 
   private attach(): void {
-    const onMove = (e: PointerEvent) => {
-      const id = this.componentAtEvent(e);
-      if (id !== this.hoverId) {
-        this.hoverId = id;
-        this.canvas.style.cursor = id !== null && this.isToggleable(id) ? "pointer" : "default";
-        this.draw();
-      }
-    };
-    const onLeave = () => {
-      this.hoverId = null;
-      this.canvas.style.cursor = "default";
-      this.draw();
-    };
+    const onMove = (e: PointerEvent) => this.setHover(this.componentAtEvent(e));
+    const onLeave = () => this.setHover(null);
     const onClick = (e: MouseEvent) => {
       const id = this.componentAtEvent(e);
       if (id === null || !this.isToggleable(id)) return;
@@ -205,6 +207,39 @@ export class CircCanvas<C extends string = ThemeColorKey> {
    * set rather than from a stale one (replaying through the runtime alone
    * leaves the private map behind). Ignored for anything but a root input pin.
    */
+  /**
+   * The single funnel for hover changes: cursor, redraw and callback in one
+   * place, which is what makes `pointerleave` idempotent and the callback
+   * change-only.
+   */
+  private setHover(id: number | null): void {
+    if (id === this.hoverId) return;
+    this.hoverId = id;
+    this.canvas.style.cursor = id !== null && this.isToggleable(id) ? "pointer" : "default";
+    this.draw();
+    this.options.onHover?.(id);
+  }
+
+  /**
+   * Highlight one component from the host — an editor cursor, a table header.
+   * Feeds the same `hovered` flag the pointer does, so a skin needs no second
+   * branch; `null` clears it, and an id with no box is a harmless no-op.
+   */
+  setHighlight(id: number | null): void {
+    if (id === this.highlightId) return;
+    this.highlightId = id;
+    this.draw();
+  }
+
+  /**
+   * The grid this canvas drew. Live and read-only by contract: a host needs it
+   * to map a declared name to a box, which the topology alone cannot do for a
+   * collapsed subcircuit — those carry synthetic ids that exist only here.
+   */
+  getLayout(): LayoutGrid {
+    return this.layout;
+  }
+
   setInputSignal(id: number, signal: Signal): void {
     if (!this.isToggleable(id)) return;
     this.inputState.set(id, signal);
@@ -289,7 +324,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
         outputSignal: signalOf(outValue),
         inputValues: inValues,
         outputValue: outValue,
-        hovered: this.hoverId === comp.id,
+        hovered: this.hoverId === comp.id || this.highlightId === comp.id,
       };
       const skin = pickSkin(theme as CircTheme<string>, skinArgs);
       skin(skinArgs);
