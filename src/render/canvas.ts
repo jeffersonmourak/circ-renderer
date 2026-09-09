@@ -30,6 +30,12 @@ export interface RenderOptions<C extends string = ThemeColorKey> {
   padding?: number;
   /** When true, the canvas pointer can toggle input-pin states. */
   interactive?: boolean;
+  /**
+   * Called after a click toggled an input pin. Hosts that rebuild the canvas
+   * (theme flips, recompiles) record pins here and replay them through
+   * `setInputSignal` on the fresh instance.
+   */
+  onPinToggle?: (id: number, signal: Signal) => void;
 }
 
 const DEFAULTS = { cell: 12, padding: 4 };
@@ -180,9 +186,8 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       const id = this.componentAtEvent(e);
       if (id === null || !this.isToggleable(id)) return;
       const next: Signal = this.inputState.get(id) === 1 ? 0 : 1;
-      this.inputState.set(id, next);
-      this.runtime.setPinAndRun(id, next);
-      this.refreshState();
+      this.setInputSignal(id, next);
+      this.options.onPinToggle?.(id, next);
     };
     this.canvas.addEventListener("pointermove", onMove);
     this.canvas.addEventListener("pointerleave", onLeave);
@@ -192,6 +197,19 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       () => this.canvas.removeEventListener("pointerleave", onLeave),
       () => this.canvas.removeEventListener("click", onClick),
     );
+  }
+
+  /**
+   * Drive an input pin from the host and redraw. Keeps the canvas's own
+   * toggle state in sync, so a later click flips from the value the host
+   * set rather than from a stale one (replaying through the runtime alone
+   * leaves the private map behind). Ignored for anything but a root input pin.
+   */
+  setInputSignal(id: number, signal: Signal): void {
+    if (!this.isToggleable(id)) return;
+    this.inputState.set(id, signal);
+    this.runtime.setPinAndRun(id, signal);
+    this.refreshState();
   }
 
   private isToggleable(id: number): boolean {

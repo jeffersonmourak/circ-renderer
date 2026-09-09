@@ -37,6 +37,7 @@ Multi-bit nets (buses, widths 1–64) are supported: bus wires render heavier in
 | `theme`        | `CircTheme`                         | colors + skins, see below |
 | `interactive`  | `boolean` (default true)            | enable pin clicks |
 | `layoutOptions`| `{ expandMacros?: boolean }`        | passed through to layout |
+| `onPinToggle`  | `(id, signal) => void`              | called after a click toggles an input pin; pair with `view.setInputSignal(id, signal)` to replay pins onto a rebuilt canvas |
 
 Returns `{ runtime, view, canvas, destroy() }`.
 
@@ -140,7 +141,7 @@ The compiled `.wasm` carries two custom sections produced by `circ-compile`:
 - **`circ.topology.v0.min`** (magic `CIRC`) — the lightweight payload the *runtime* parses (`id`, `kind`, `width`, connections). Boot path: `topology_alloc(size) → memcpy → init()`.
 - **`circ.topology.v0.full`** (magic `CIRF`) — the rich payload the *renderer* parses (adds `name`, `width`, origin chain, and slice `[lo, hi)` aux). Decoded directly from the module bytes; no extra fetch.
 
-The decoder accepts **CIRF v0x01 and v0x02**. v02 added a per-component `width` byte and the slice aux suffix; v01 payloads (pre-2.0 artifacts) decode with width defaulted to 1 and no `slice`/`concat` kinds.
+The decoder accepts **CIRF v0x01 and v0x02** (exported as `SUPPORTED_TOPOLOGY_VERSIONS` for hosts that compile at runtime). v02 added a per-component `width` byte and the slice aux suffix; v01 payloads (pre-2.0 artifacts) decode with width defaulted to 1 and no `slice`/`concat` kinds.
 
 The simulation runtime is driven through one of two export ABIs, detected automatically:
 

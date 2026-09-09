@@ -127,6 +127,14 @@ const FULL_MAGIC = "CIRF";
 const FULL_VERSION_V1 = 0x01;
 const FULL_VERSION_V2 = 0x02;
 
+/**
+ * CIRF (`circ.topology.v0.full`) versions this decoder reads. A host that
+ * compiles circuits at runtime (the circ playground) compares the compiler's
+ * reported `full_version` against this list before handing artifacts to
+ * `renderCircuit`.
+ */
+export const SUPPORTED_TOPOLOGY_VERSIONS: readonly number[] = [FULL_VERSION_V1, FULL_VERSION_V2];
+
 class Cursor {
   pos = 0;
   constructor(readonly bytes: Uint8Array) {}
@@ -165,9 +173,10 @@ export function decodeFullTopology(bytes: Uint8Array): FullTopology {
     throw new Error(`topology: bad magic ${JSON.stringify(magic)}, expected ${FULL_MAGIC}`);
   }
   const version = cur.u8();
-  if (version !== FULL_VERSION_V1 && version !== FULL_VERSION_V2) {
+  if (!SUPPORTED_TOPOLOGY_VERSIONS.includes(version)) {
+    const list = SUPPORTED_TOPOLOGY_VERSIONS.map((v) => `0x${v.toString(16).padStart(2, "0")}`).join(" and ");
     throw new Error(
-      `topology: unsupported CIRF version 0x${version.toString(16)} (this decoder reads 0x01 and 0x02)`
+      `topology: unsupported CIRF version 0x${version.toString(16)} (this decoder reads ${list})`
     );
   }
   const hasWidthAndAux = version >= FULL_VERSION_V2;

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ComponentKind,
+  SUPPORTED_TOPOLOGY_VERSIONS,
   decodeFullTopology,
   extractCustomSection,
 } from "../src/wasm/topology";
@@ -57,4 +58,14 @@ test("rejects an unknown CIRF version", () => {
   // Forge a header with version 0x09.
   const bytes = new Uint8Array([0x43, 0x49, 0x52, 0x46, 0x09, 0, 0, 0, 0, 0, 0, 0, 0]);
   expect(() => decodeFullTopology(bytes)).toThrow(/unsupported CIRF version/);
+});
+
+test("SUPPORTED_TOPOLOGY_VERSIONS lists v01 and v02", () => {
+  expect([...SUPPORTED_TOPOLOGY_VERSIONS]).toEqual([1, 2]);
+  const bytes = new Uint8Array(readFileSync(join(FIX, "inverter.wasm")));
+  const section = extractCustomSection(bytes, "circ.topology.v0.full")!;
+  expect(SUPPORTED_TOPOLOGY_VERSIONS).toContain(section[4]);
+  const forged = new Uint8Array(section);
+  forged[4] = 0x04;
+  expect(() => decodeFullTopology(forged)).toThrow(/unsupported CIRF version 0x4/);
 });
