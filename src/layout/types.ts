@@ -38,6 +38,8 @@ export interface VirtualNode {
   bitWidth: number;
   /** Bit range for `Slice` nodes, threaded from the topology aux. */
   slice?: { lo: number; hi: number };
+  /** Address width for `Rom`/`Ram` nodes, threaded from the topology aux. */
+  memory?: { addrWidth: number };
 }
 
 export interface VirtualGraph {
@@ -63,7 +65,7 @@ export interface PortCoord {
 }
 
 export interface PortSlot {
-  /** Port label as drawn on the box border: "in" | "a" | "b" (no "out" — out is the single output port). */
+  /** Port label as drawn on the box border: "in" | "a" | "b" | "addr" | "din" | "we" | "clk" | "op<N>" (no "out" — out is the single output port). */
   portName: string;
   coord: PortCoord;
 }
@@ -84,6 +86,8 @@ export interface PlacedComponent {
   bitWidth: number;
   /** Bit range for `Slice` components. */
   slice?: { lo: number; hi: number };
+  /** Address width for `Rom`/`Ram` components. */
+  memory?: { addrWidth: number };
 }
 
 export interface Segment {

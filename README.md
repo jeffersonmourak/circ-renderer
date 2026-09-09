@@ -141,7 +141,7 @@ The compiled `.wasm` carries two custom sections produced by `circ-compile`:
 - **`circ.topology.v0.min`** (magic `CIRC`) — the lightweight payload the *runtime* parses (`id`, `kind`, `width`, connections). Boot path: `topology_alloc(size) → memcpy → init()`.
 - **`circ.topology.v0.full`** (magic `CIRF`) — the rich payload the *renderer* parses (adds `name`, `width`, origin chain, and slice `[lo, hi)` aux). Decoded directly from the module bytes; no extra fetch.
 
-The decoder accepts **CIRF v0x01 and v0x02** (exported as `SUPPORTED_TOPOLOGY_VERSIONS` for hosts that compile at runtime). v02 added a per-component `width` byte and the slice aux suffix; v01 payloads (pre-2.0 artifacts) decode with width defaulted to 1 and no `slice`/`concat` kinds.
+The decoder accepts **CIRF v0x01, v0x02 and v0x03** (exported as `SUPPORTED_TOPOLOGY_VERSIONS` for hosts that compile at runtime). v03 adds the `rom`/`ram` kinds (`8`/`9`) with a trailing `addr_width` byte, exposed as `FullComponent.memory`, and the `addr`/`din`/`we`/`clk` port bytes (`4..7`); memory boxes are laid out and drawn with the CLI's `--preview` geometry (`rom code[8,4]`, one `addr` port; a 9-row `ram` box with four ports). The runtime's eight memory exports (`getMemInfo` … `getMemDefined`) are typed on `runtime.raw`; loading images from the canvas is not part of the renderer. v02 added a per-component `width` byte and the slice aux suffix; v01 payloads (pre-2.0 artifacts) decode with width defaulted to 1 and no `slice`/`concat` kinds.
 
 The simulation runtime is driven through one of two export ABIs, detected automatically:
 
@@ -165,8 +165,8 @@ bun run dev
 ## Tests
 
 ```bash
-bun test        # decode (v01 + v02), runtime ABI, and layout tests
+bun test        # decode (v01..v03), runtime ABI (incl. memory exports), and layout tests
 bun run typecheck
 ```
 
-`test/fixtures/` holds compiled `.wasm` fixtures: current v02 artifacts plus a frozen `and_v01.wasm` that guards the v01 decode + scalar-ABI fallback path.
+`test/fixtures/` holds compiled `.wasm` fixtures: v02 artifacts, the v03 `rom_lookup.wasm` / `ram_write_read.wasm` (memory records, ports and exports), plus a frozen `and_v01.wasm` that guards the v01 decode + scalar-ABI fallback path. The v01/v02 fixtures are never regenerated.

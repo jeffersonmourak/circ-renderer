@@ -20,7 +20,24 @@ export const primitiveSizing: Record<ComponentKind, PrimitiveSize> = {
   // Bit-shape kinds; concat grows with operand count via `concatSize`.
   [ComponentKind.Slice]: { width: 5, height: 3 },
   [ComponentKind.Concat]: { width: 5, height: 3 },
+  // Memories size dynamically via `memorySize` (the label carries the
+  // instance name and widths); zero sentinels here.
+  [ComponentKind.Rom]: { width: 0, height: 0 },
+  [ComponentKind.Ram]: { width: 0, height: 0 },
 };
+
+/** `rom code[8,4]` — the label a memory box carries (matches `--preview`). */
+export function memoryLabel(kind: ComponentKind, name: string, width: number, addrWidth: number): string {
+  return `${kind === ComponentKind.Rom ? "rom" : "ram"} ${name}[${width},${addrWidth}]`;
+}
+
+/**
+ * Memory box: wide enough for its label like a pin, tall enough for one
+ * input port per odd border row like a macro box (rom: 3 rows, ram: 9).
+ */
+export function memorySize(labelLen: number, inputCount: number): PrimitiveSize {
+  return { width: Math.max(5, labelLen + 4), height: inputCount <= 1 ? 3 : 2 * inputCount + 1 };
+}
 
 /**
  * Slice tap box. Width fits the `[lo:hi]` label (or `[i]` for a single bit)

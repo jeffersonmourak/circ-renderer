@@ -1,6 +1,6 @@
 import { buildLayout, type LayoutGrid, type LayoutOptions, type PlacedComponent, type RoutedWire } from "../layout";
 import { isPrimitive } from "../layout/types";
-import { type BitValue, ComponentKind, type Signal, signalOf, undefinedValue, widthMask } from "../wasm/topology";
+import { type BitValue, ComponentKind, type Signal, portByteOfName, signalOf, undefinedValue, widthMask } from "../wasm/topology";
 import type { CircRuntime } from "../wasm/runtime";
 import {
   baseTheme,
@@ -280,7 +280,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       const driver = this.realDriverByComp.get(comp.id) ?? comp.id;
       const outValue = this.signals.get(driver) ?? undefinedValue(comp.bitWidth);
       const inValues = comp.inPorts.map((slot) => {
-        const wireIdx = layout.wires.findIndex((w) => w.dstId === comp.id && portByteOf(slot.portName) === w.dstPort);
+        const wireIdx = layout.wires.findIndex((w) => w.dstId === comp.id && portByteOfName(slot.portName) === w.dstPort);
         return wireIdx >= 0 ? this.wireValue.get(wireIdx) ?? undefinedValue(1) : undefinedValue(1);
       });
       const skinArgs = {
@@ -413,7 +413,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       // Destination marker.
       const dst = compById.get(wire.dstId);
       if (!dst) continue;
-      const slot = dst.inPorts.find((p) => portByteOf(p.portName) === wire.dstPort);
+      const slot = dst.inPorts.find((p) => portByteOfName(p.portName) === wire.dstPort);
       if (!slot) continue;
       if (theme.portMarker) {
         theme.portMarker({
@@ -466,7 +466,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     // Destination-side stub: from the in_port into the destination box.
     const dst = compById.get(wire.dstId);
     if (dst) {
-      const slot = dst.inPorts.find((p) => portByteOf(p.portName) === wire.dstPort);
+      const slot = dst.inPorts.find((p) => portByteOfName(p.portName) === wire.dstPort);
       if (slot) {
         const dy = slot.coord.y * cell + cell / 2;
         ctx.beginPath();
@@ -511,21 +511,5 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       ctx.lineTo(segHi, y);
       ctx.stroke();
     }
-  }
-}
-
-function portByteOf(name: string): number {
-  switch (name) {
-    case "in": return 0;
-    case "a":  return 1;
-    case "b":  return 2;
-    case "out": return 3;
-    default:
-      // Concat operand ports are `op<index>`; the index IS the port byte.
-      if (name.startsWith("op")) {
-        const idx = Number(name.slice(2));
-        if (Number.isInteger(idx)) return idx;
-      }
-      return 0xff;
   }
 }

@@ -44,6 +44,17 @@ interface RuntimeExports {
   getOutputDefined?: (componentId: number) => bigint;
   // v1 ABI:
   getOutputState?: (componentId: number) => number;
+  // Topology v03 memory exports (rom/ram); absent on older artifacts. See
+  // circ-compiler's DOCS/wasm-api.md for the status codes and the raw image
+  // layout (`ceil(W/8)` little-endian bytes per word).
+  getMemInfo?: (id: number) => number;
+  memBuffer?: (id: number) => number;
+  memLoad?: (id: number, len: number) => number;
+  memStore?: (id: number) => number;
+  memClear?: (id: number) => number;
+  setMemWord?: (id: number, addr: number, value: bigint, defined: bigint) => number;
+  getMemValue?: (id: number, addr: number) => bigint;
+  getMemDefined?: (id: number, addr: number) => bigint;
   // Optional / future:
   reset?: () => void;
   deinit?: () => void;

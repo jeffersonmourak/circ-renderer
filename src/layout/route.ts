@@ -1,4 +1,4 @@
-import { PortName } from "../wasm/topology";
+import { PortName, portByteOfName } from "../wasm/topology";
 import {
   type PlacedComponent,
   type PortCoord,
@@ -536,19 +536,9 @@ function detourHConflicts(pending: PendingWire[], placed: PlacedComponent[]): vo
 
 function portCoordOf(pc: PlacedComponent, dstPort: number): PortCoord | null {
   for (const slot of pc.inPorts) {
-    if (portByteOf(slot.portName) === dstPort) return slot.coord;
+    if (portByteOfName(slot.portName) === dstPort) return slot.coord;
   }
   return null;
-}
-
-function portByteOf(name: string): number {
-  switch (name) {
-    case "in": return PortName.In;
-    case "a":  return PortName.A;
-    case "b":  return PortName.B;
-    case "out": return PortName.Out;
-    default: return 0xff;
-  }
 }
 
 function isSuperTrunkBilateral(st: SuperTrunk, trunks: Trunk[]): boolean {

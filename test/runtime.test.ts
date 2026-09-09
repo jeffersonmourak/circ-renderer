@@ -44,3 +44,22 @@ test("v01 ABI: scalar fixture still drives and reads", async () => {
   rt.setPinAndRun(ins[0].id, 0);
   expect(rt.readValue(out.id).value).toBe(0n); // one low → 0
 });
+
+test("v03 artifact: memory exports load an image and the lookup reads back", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const code = idOf(rt, "code");
+  const pc = idOf(rt, "pc");
+  const out = idOf(rt, "out");
+  const raw = rt.raw;
+  // (kind << 16) | (W << 8) | A with the topology kind byte (rom = 8).
+  expect(raw.getMemInfo!(code)).toBe((8 << 16) | (8 << 8) | 4);
+  const ptr = raw.memBuffer!(code);
+  expect(ptr).toBeGreaterThan(0);
+  // Re-view memory.buffer after the call: the allocation may have grown it.
+  const image = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) image[i] = i * 0x11;
+  new Uint8Array(raw.memory.buffer).set(image, ptr);
+  expect(raw.memLoad!(code, 16)).toBe(0);
+  rt.setValueAndRun(pc, 3n, 0xfn);
+  expect(rt.readValue(out)).toEqual({ value: 0x33n, defined: 0xffn, width: 8 });
+});

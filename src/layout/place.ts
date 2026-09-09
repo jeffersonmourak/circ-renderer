@@ -1,5 +1,5 @@
 import { ComponentKind, PortName } from "../wasm/topology";
-import { concatSize, macroSize, pinSize, primitiveSizing, sliceSize, type PrimitiveSize } from "./sizing";
+import { concatSize, macroSize, pinSize, primitiveSizing, sliceSize, type PrimitiveSize, memoryLabel, memorySize } from "./sizing";
 import {
   type ColumnAssignment,
   isPrimitive,
@@ -78,6 +78,7 @@ export function place(
       outPort: ports.outPort,
       bitWidth: node.bitWidth,
       slice: node.slice,
+      memory: node.memory,
     };
   }
   return placed;
@@ -95,6 +96,10 @@ function sizeOf(node: VirtualNode): PrimitiveSize {
     }
     if (k === ComponentKind.Concat) {
       return concatSize(operandCount(node));
+    }
+    if (k === ComponentKind.Rom || k === ComponentKind.Ram) {
+      const label = memoryLabel(k, node.name, node.bitWidth, node.memory?.addrWidth ?? 0);
+      return memorySize(label.length, k === ComponentKind.Rom ? 1 : 4);
     }
     return primitiveSizing[k];
   }
@@ -170,6 +175,17 @@ function resolvePortCoords(node: VirtualNode, x: number, y: number, w: number, h
         outPort = { x: x + w, y: y + Math.floor(h / 2) };
         break;
       }
+      case ComponentKind.Rom:
+        inPorts.push({ portName: "addr", coord: { x: sat(x - 1), y: y + 1 } });
+        outPort = { x: x + w, y: y + 1 };
+        break;
+      case ComponentKind.Ram:
+        // Four inputs on the odd border rows of a 9-tall box, output centred.
+        ["addr", "din", "we", "clk"].forEach((portName, slot) => {
+          inPorts.push({ portName, coord: { x: sat(x - 1), y: y + 1 + 2 * slot } });
+        });
+        outPort = { x: x + w, y: y + Math.floor(h / 2) };
+        break;
       case ComponentKind.Wire:
         // wires were collapsed in stage 1
         break;

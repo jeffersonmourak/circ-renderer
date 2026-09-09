@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ComponentKind,
+  PortName,
   SUPPORTED_TOPOLOGY_VERSIONS,
   decodeFullTopology,
   extractCustomSection,
+  portByteOfName,
 } from "../src/wasm/topology";
 
 const FIX = join(import.meta.dir, "fixtures");
@@ -60,12 +62,43 @@ test("rejects an unknown CIRF version", () => {
   expect(() => decodeFullTopology(bytes)).toThrow(/unsupported CIRF version/);
 });
 
-test("SUPPORTED_TOPOLOGY_VERSIONS lists v01 and v02", () => {
-  expect([...SUPPORTED_TOPOLOGY_VERSIONS]).toEqual([1, 2]);
+test("SUPPORTED_TOPOLOGY_VERSIONS lists v01..v03", () => {
+  expect([...SUPPORTED_TOPOLOGY_VERSIONS]).toEqual([1, 2, 3]);
   const bytes = new Uint8Array(readFileSync(join(FIX, "inverter.wasm")));
   const section = extractCustomSection(bytes, "circ.topology.v0.full")!;
   expect(SUPPORTED_TOPOLOGY_VERSIONS).toContain(section[4]);
   const forged = new Uint8Array(section);
   forged[4] = 0x04;
   expect(() => decodeFullTopology(forged)).toThrow(/unsupported CIRF version 0x4/);
+});
+
+test("decodes a v03 payload with rom memory aux", () => {
+  // rom_lookup: input[4] pc; rom code[8, 4](addr = pc.out); output[8] out(in = code.out)
+  const topo = cirf("rom_lookup.wasm");
+  expect(topo.components.length).toBe(3);
+  const byName = (n: string) => topo.components.find((c) => c.name === n)!;
+  expect(byName("code").kind).toBe(ComponentKind.Rom);
+  expect(byName("code").width).toBe(8);
+  expect(byName("code").memory).toEqual({ addrWidth: 4 });
+  expect(byName("out").kind).toBe(ComponentKind.OutputPin);
+  expect(byName("out").width).toBe(8);
+  const into = topo.connections.filter((c) => c.toId === byName("code").id);
+  expect(into.length).toBe(1);
+  expect(into[0].port).toBe(PortName.Addr);
+});
+
+test("decodes ram ports on the connection table", () => {
+  const topo = cirf("ram_write_read.wasm");
+  const data = topo.components.find((c) => c.name === "data")!;
+  expect(data.kind).toBe(ComponentKind.Ram);
+  expect(data.memory).toEqual({ addrWidth: 4 });
+  const ports = topo.connections.filter((c) => c.toId === data.id).map((c) => c.port).sort();
+  expect(ports).toEqual([PortName.Addr, PortName.Din, PortName.We, PortName.Clk]);
+});
+
+test("portByteOfName maps every port label", () => {
+  expect(["in", "a", "b", "out"].map(portByteOfName)).toEqual([0, 1, 2, 3]);
+  expect(["addr", "din", "we", "clk"].map(portByteOfName)).toEqual([4, 5, 6, 7]);
+  expect(portByteOfName("op2")).toBe(2);
+  expect(portByteOfName("nope")).toBe(0xff);
 });

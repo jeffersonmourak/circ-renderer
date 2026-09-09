@@ -7,6 +7,7 @@ import {
   styleForSignal,
 } from "../utils/theme";
 import { isPrimitive } from "../layout/types";
+import { memoryLabel } from "../layout/sizing";
 
 /** Resolve a single theme color, falling back to a sentinel if missing. */
 const color = <C extends string>(theme: CircTheme<C>, key: C, fallback = "#000"): string =>
@@ -210,6 +211,22 @@ const drawSubcircuit: Skin<ThemeColorKey> = ({ ctx, theme, cell, component }) =>
   }
 };
 
+/** Memory box: macro-coloured border, `rom code[8,4]` label, fill by output signal. */
+const drawMemory: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+  boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, outputSignal);
+  ctx.strokeStyle = color(theme as CircTheme<string>, "macro" as string, "#6f42c1");
+  ctx.lineWidth = Math.max(1, cell * 0.12);
+  const px = component.x * cell, py = component.y * cell;
+  const pw = component.width * cell, ph = component.height * cell;
+  ctx.beginPath();
+  ctx.roundRect(px + ctx.lineWidth / 2, py + ctx.lineWidth / 2, pw - ctx.lineWidth, ph - ctx.lineWidth, cell * 0.25);
+  ctx.stroke();
+  if (isPrimitive(component.kind)) {
+    const label = memoryLabel(component.kind.kind, component.name, component.bitWidth, component.memory?.addrWidth ?? 0);
+    drawLabel(ctx, theme, cell, label, px + pw / 2, py + ph / 2);
+  }
+};
+
 export const defaultSkins: Required<NonNullable<CircTheme<ThemeColorKey>["skins"]>> = {
   [ComponentKind.InputPin]: drawPin,
   [ComponentKind.OutputPin]: drawOutputPin,
@@ -219,6 +236,8 @@ export const defaultSkins: Required<NonNullable<CircTheme<ThemeColorKey>["skins"
   [ComponentKind.Wire]: () => {}, // wires are collapsed; never drawn as a component
   [ComponentKind.Slice]: drawSlice,
   [ComponentKind.Concat]: drawConcat,
+  [ComponentKind.Rom]: drawMemory,
+  [ComponentKind.Ram]: drawMemory,
   subcircuit: drawSubcircuit,
 };
 

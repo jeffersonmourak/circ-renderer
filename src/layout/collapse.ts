@@ -175,6 +175,7 @@ export function collapse(
       outputs: nodeOutputs.get(vid)!,
       bitWidth: c.width,
       slice: c.slice,
+      memory: c.memory,
     });
   }
   for (let i = 0; i < groupKeys.length; i++) {
