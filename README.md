@@ -167,6 +167,25 @@ await renderCircuit({ url: "/static/foo.wasm", theme });
 | `label`          | text on gates                                 |
 | `labelMuted`     | reserved for secondary labels                 |
 | `macro`          | subcircuit (collapsed) box border             |
+| `highlight`      | ring around a hovered or host-highlighted box |
+
+### Highlight
+
+A hovered component, and one the host marks with `view.setHighlight(id)`, gets
+a ring drawn around its box — by the canvas, after every skin, for every kind.
+A skin does not have to read `hovered` to be reachable, though it still may.
+A theme can take the ring over with `highlight({ ctx, theme, cell, component,
+reason })`, where `reason` is `hover`, `highlight` or `both`, or pass a no-op
+to draw none. The default ring uses the `highlight` colour.
+
+### Building a skin from the default pieces
+
+The helpers the default skins are built from are exported — `boxOutline`,
+`drawLabel`, `memoryLabel`, and the colour resolvers `fill`, `stroke`,
+`labelColor` and `color` — along with each default skin (`drawMemory`,
+`drawSlice`, `drawConcat`, `drawSubcircuit` and the rest). A host that draws
+its own gates can give a rom, ram, slice or concat the same look in a few
+lines, or wrap a default skin and add to it.
 
 ### The bus value badge
 

@@ -10,10 +10,11 @@ import { isPrimitive } from "../layout/types";
 import { memoryLabel } from "../layout/sizing";
 
 /** Resolve a single theme color, falling back to a sentinel if missing. */
-const color = <C extends string>(theme: CircTheme<C>, key: C, fallback = "#000"): string =>
+export const color = <C extends string>(theme: CircTheme<C>, key: C, fallback = "#000"): string =>
   theme.colors[key] ?? fallback;
 
-const fill = <C extends string>(theme: CircTheme<C>, sig: Signal): string => {
+/** The box fill for a signal: `fillActive`, `fillIdle` or `fillUndefined`. */
+export const fill = <C extends string>(theme: CircTheme<C>, sig: Signal): string => {
   const k: ThemeColorKey = (
     styleForSignal(sig) === "active" ? "fillActive"
       : styleForSignal(sig) === "idle" ? "fillIdle"
@@ -22,14 +23,20 @@ const fill = <C extends string>(theme: CircTheme<C>, sig: Signal): string => {
   return color(theme as CircTheme<string>, k as string, "#fff");
 };
 
-const stroke = <C extends string>(theme: CircTheme<C>): string =>
+export const stroke = <C extends string>(theme: CircTheme<C>): string =>
   color(theme as CircTheme<string>, "stroke" as string, "#222");
 
-const labelColor = <C extends string>(theme: CircTheme<C>): string =>
+export const labelColor = <C extends string>(theme: CircTheme<C>): string =>
   color(theme as CircTheme<string>, "label" as string, "#222");
 
-/** Box rectangle in *cell* units → fills with idle background then strokes border. */
-function boxOutline<C extends string>(
+/**
+ * Box rectangle in *cell* units → fills by signal then strokes the border.
+ *
+ * Exported, with `drawLabel` and `memoryLabel`, so a host can build a rom, ram,
+ * slice or concat skin in its own palette from the same pieces the defaults
+ * are built from, rather than re-deriving the geometry.
+ */
+export function boxOutline<C extends string>(
   ctx: CanvasRenderingContext2D,
   theme: CircTheme<C>,
   cell: number,
@@ -51,7 +58,7 @@ function boxOutline<C extends string>(
   ctx.stroke();
 }
 
-function drawLabel<C extends string>(
+export function drawLabel<C extends string>(
   ctx: CanvasRenderingContext2D,
   theme: CircTheme<C>,
   cell: number,
@@ -65,7 +72,9 @@ function drawLabel<C extends string>(
   ctx.fillText(text, cx, cy);
 }
 
-const drawPin: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+export { memoryLabel };
+
+export const drawPin: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
   boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, outputSignal);
   drawLabel(
     ctx, theme, cell,
@@ -75,7 +84,7 @@ const drawPin: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSigna
   );
 };
 
-const drawOutputPin: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, inputSignals }) => {
+export const drawOutputPin: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, inputSignals }) => {
   const sig = inputSignals[0] ?? 2;
   boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, sig);
   drawLabel(
@@ -86,7 +95,7 @@ const drawOutputPin: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, input
   );
 };
 
-const drawNot: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+export const drawNot: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
   // Triangle + bubble. Cell is 5×3.
   const x0 = component.x * cell;
   const y0 = component.y * cell;
@@ -112,7 +121,7 @@ const drawNot: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSigna
   ctx.stroke();
 };
 
-const drawAnd: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+export const drawAnd: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
   // D-shape silhouette in 5×5.
   const x0 = component.x * cell;
   const y0 = component.y * cell;
@@ -136,7 +145,7 @@ const drawAnd: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSigna
   ctx.stroke();
 };
 
-const drawLed: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, inputSignals }) => {
+export const drawLed: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, inputSignals }) => {
   const sig = inputSignals[0] ?? 2;
   const x0 = component.x * cell;
   const y0 = component.y * cell;
@@ -165,7 +174,7 @@ const drawLed: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, inputSignal
   }
 };
 
-const drawSlice: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+export const drawSlice: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
   boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, outputSignal);
   const { lo, hi } = component.slice ?? { lo: 0, hi: 1 };
   const label = hi - lo <= 1 ? `[${lo}]` : `[${lo}:${hi}]`;
@@ -176,7 +185,7 @@ const drawSlice: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSig
   );
 };
 
-const drawConcat: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+export const drawConcat: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
   boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, outputSignal);
   drawLabel(
     ctx, theme, cell, "{·}",
@@ -185,7 +194,7 @@ const drawConcat: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSi
   );
 };
 
-const drawSubcircuit: Skin<ThemeColorKey> = ({ ctx, theme, cell, component }) => {
+export const drawSubcircuit: Skin<ThemeColorKey> = ({ ctx, theme, cell, component }) => {
   const x0 = component.x * cell;
   const y0 = component.y * cell;
   const w = component.width * cell;
@@ -212,7 +221,7 @@ const drawSubcircuit: Skin<ThemeColorKey> = ({ ctx, theme, cell, component }) =>
 };
 
 /** Memory box: macro-coloured border, `rom code[8,4]` label, fill by output signal. */
-const drawMemory: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
+export const drawMemory: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
   boxOutline(ctx, theme, cell, component.x, component.y, component.width, component.height, outputSignal);
   ctx.strokeStyle = color(theme as CircTheme<string>, "macro" as string, "#6f42c1");
   ctx.lineWidth = Math.max(1, cell * 0.12);

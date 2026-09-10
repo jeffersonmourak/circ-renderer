@@ -61,11 +61,30 @@ export {
   type BackgroundContext,
   type PortMarkerContext,
   type BusValueContext,
+  type HighlightContext,
   type SignalStyle,
   type WireStyle,
 } from "./utils/theme";
 
-export { defaultSkins } from "./render/skins";
+export {
+  defaultSkins,
+  boxOutline,
+  drawLabel,
+  memoryLabel,
+  color,
+  fill,
+  stroke,
+  labelColor,
+  drawPin,
+  drawOutputPin,
+  drawNot,
+  drawAnd,
+  drawLed,
+  drawSlice,
+  drawConcat,
+  drawMemory,
+  drawSubcircuit,
+} from "./render/skins";
 
 export interface RenderCircuitOptions<C extends string = string>
   extends RenderOptions<C> {

@@ -569,6 +569,49 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     this.drawPortMarkers(compById);
     // Bus value badges for multi-bit nets, above everything.
     this.drawBusValues();
+    // The highlight, above even those: one ring per marked component, drawn
+    // here for every kind so no skin has to read `hovered` to be reachable.
+    this.drawHighlights(compById);
+  }
+
+  /**
+   * Mark the hovered and the host-highlighted components.
+   *
+   * Every default skin used to ignore the `hovered` flag it was handed, so a
+   * host highlight was invisible on any kind the host did not skin itself —
+   * the playground's source-to-picture link drew nothing on a rom, a ram, a
+   * slice or a concat. One ring drawn here covers all of them at once.
+   */
+  private drawHighlights(compById: Map<number, PlacedComponent>): void {
+    const ids = new Set<number>();
+    if (this.hoverId !== null) ids.add(this.hoverId);
+    if (this.highlightId !== null) ids.add(this.highlightId);
+    if (ids.size === 0) return;
+    const { ctx, cell, theme } = this;
+    for (const id of ids) {
+      const comp = compById.get(id);
+      if (!comp) continue;
+      const reason =
+        this.hoverId === id && this.highlightId === id ? "both" : this.hoverId === id ? "hover" : "highlight";
+      if (theme.highlight) {
+        theme.highlight({ ctx, theme: theme as CircTheme<string>, cell, component: comp, reason });
+        continue;
+      }
+      const pad = cell * 0.18;
+      const x = comp.x * cell - pad;
+      const y = comp.y * cell - pad;
+      const w = comp.width * cell + pad * 2;
+      const h = comp.height * cell + pad * 2;
+      const r = Math.min(cell * 0.4, w / 2, h / 2);
+      ctx.save();
+      ctx.strokeStyle = theme.colors["highlight"] ?? "#f59f00";
+      ctx.lineWidth = Math.max(1, cell * 0.1);
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r);
+      else ctx.rect(x, y, w, h);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /**

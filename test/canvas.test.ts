@@ -517,3 +517,120 @@ test("destroy closes an open field and removes every listener it attached", asyn
   // The canvas element itself still carries only the three it always did.
   expect([...el.listeners.keys()].sort()).toEqual(["click", "pointerleave", "pointermove"]);
 });
+
+// ---------------------------------------------------------------------------
+// The highlight is drawn by the canvas, for every kind.
+//
+// Every default skin used to ignore the `hovered` flag it was handed, so a
+// host highlight was invisible on any kind the host did not skin itself. The
+// ring is drawn here now, once per marked component, after everything else.
+// ---------------------------------------------------------------------------
+
+import { boxOutline, drawLabel, memoryLabel, drawMemory, drawSlice, drawConcat } from "../src/render/skins";
+import type { HighlightContext } from "../src/utils/theme";
+
+/** A theme whose highlight hook records what it was handed. */
+function recordingHighlight() {
+  const seen: { id: number; reason: string }[] = [];
+  const theme = {
+    ...baseTheme,
+    highlight: ({ component, reason }: HighlightContext) => { seen.push({ id: component.id, reason }); },
+  };
+  return { theme, seen };
+}
+
+test("the highlight hook fires for the hovered component, on every kind, and only while marked", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const { theme, seen } = recordingHighlight();
+  const canvas = new CircCanvas(rt, { theme });
+  const el = stub.created[0];
+  seen.length = 0;
+
+  // A rom is a kind the site never skinned; it is reachable now like any other.
+  const rom = canvas.getLayout().components.find(
+    (p) => isPrimitive(p.kind) && p.kind.kind === ComponentKind.Rom,
+  )!;
+  el.dispatchEvent("pointermove", centre(rom));
+  expect(seen).toEqual([{ id: rom.id, reason: "hover" }]);
+
+  // Leaving redraws with nothing marked.
+  seen.length = 0;
+  el.dispatchEvent("pointerleave", {});
+  expect(seen).toEqual([]);
+});
+
+test("a host highlight reaches the hook too, and both at once is one ring", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const { theme, seen } = recordingHighlight();
+  const canvas = new CircCanvas(rt, { theme });
+  const el = stub.created[0];
+  const pc = pin(canvas, "pc");
+  const rom = canvas.getLayout().components.find(
+    (p) => isPrimitive(p.kind) && p.kind.kind === ComponentKind.Rom,
+  )!;
+
+  seen.length = 0;
+  canvas.setHighlight(rom.id);
+  expect(seen).toEqual([{ id: rom.id, reason: "highlight" }]);
+
+  // Hovering a different component marks both, each with its own reason.
+  seen.length = 0;
+  el.dispatchEvent("pointermove", centre(pc));
+  expect(seen.map((s) => s.id).sort((a, b) => a - b)).toEqual([pc.id, rom.id].sort((a, b) => a - b));
+  expect(seen.find((s) => s.id === pc.id)!.reason).toBe("hover");
+  expect(seen.find((s) => s.id === rom.id)!.reason).toBe("highlight");
+
+  // Hovering the highlighted one is a single ring that says so.
+  seen.length = 0;
+  el.dispatchEvent("pointermove", centre(rom));
+  expect(seen).toEqual([{ id: rom.id, reason: "both" }]);
+});
+
+test("without a hook the default ring draws, and a no-op hook draws nothing", async () => {
+  const rt = await load("rom_lookup.wasm");
+  // Default: must not throw on the recording context, which is all the stub
+  // can tell us — the ring has no pixels to inspect here.
+  const canvas = new CircCanvas(rt, {});
+  const rom = canvas.getLayout().components.find(
+    (p) => isPrimitive(p.kind) && p.kind.kind === ComponentKind.Rom,
+  )!;
+  expect(() => canvas.setHighlight(rom.id)).not.toThrow();
+
+  // A theme that wants no mark at all says so with a no-op.
+  let called = 0;
+  const silent = new CircCanvas(rt, { theme: { ...baseTheme, highlight: () => { called += 1; } } });
+  silent.setHighlight(rom.id);
+  expect(called).toBe(1);
+});
+
+test("the skin still receives hovered, for a skin that wants to react on its own", async () => {
+  // The ring covers every kind; a skin may ALSO change its own fill. Both
+  // paths stay open, which is what lets a host keep an existing skin.
+  const rt = await halfAdder();
+  const { theme, seen } = recordingTheme();
+  const canvas = new CircCanvas(rt, { theme });
+  const a = pin(canvas, "a");
+  seen.length = 0;
+  canvas.setHighlight(a.id);
+  expect(hoveredIds(seen)).toEqual([a.id]);
+});
+
+test("the exported helpers draw the default boxes and labels without a real context", async () => {
+  // A host builds its own rom/ram/slice/concat skins from these; they have to
+  // be callable with the same arguments the defaults use.
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const ctx = (stub.created[0].getContext("2d") as CanvasRenderingContext2D);
+  const rom = canvas.getLayout().components.find(
+    (p) => isPrimitive(p.kind) && p.kind.kind === ComponentKind.Rom,
+  )!;
+  expect(() => boxOutline(ctx, baseTheme, 12, rom.x, rom.y, rom.width, rom.height, 1)).not.toThrow();
+  expect(() => drawLabel(ctx, baseTheme, 12, "code", 0, 0)).not.toThrow();
+  expect(memoryLabel(ComponentKind.Rom, "code", 8, 4)).toBe("rom code[8,4]");
+  const args = {
+    ctx, theme: baseTheme, cell: 12, component: rom,
+    inputSignals: [], outputSignal: 2 as const, inputValues: [], outputValue: { value: 0n, defined: 0n, width: 8 },
+    hovered: false,
+  };
+  for (const skin of [drawMemory, drawSlice, drawConcat]) expect(() => skin(args)).not.toThrow();
+});

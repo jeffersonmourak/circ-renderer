@@ -15,7 +15,8 @@ export type ThemeColorKey =
   | "busLabel"
   | "label"
   | "labelMuted"
-  | "macro";
+  | "macro"
+  | "highlight";
 
 export const defaultColors: Record<ThemeColorKey, string> = {
   background: "#f8f9fa",
@@ -34,6 +35,8 @@ export const defaultColors: Record<ThemeColorKey, string> = {
   label: "#212529",
   labelMuted: "#868e96",
   macro: "#6f42c1",
+  // The ring drawn around a hovered or host-highlighted component.
+  highlight: "#f59f00",
 };
 
 export type SignalStyle = "idle" | "active" | "undefined";
@@ -117,6 +120,20 @@ export interface PortMarkerContext<C extends string = ThemeColorKey> {
   side: "source" | "destination";
 }
 
+/**
+ * What a theme is handed to draw the highlight on one component. It is drawn
+ * once per highlighted component, after every skin, marker and badge, so it
+ * sits on top of whatever the skin drew.
+ */
+export interface HighlightContext<C extends string = ThemeColorKey> {
+  ctx: CanvasRenderingContext2D;
+  theme: CircTheme<C>;
+  cell: number;
+  component: PlacedComponent;
+  /** Why it is highlighted: the pointer is over it, the host asked, or both. */
+  reason: "hover" | "highlight" | "both";
+}
+
 export type Skin<C extends string = ThemeColorKey> = (
   ctx: SkinContext<C>
 ) => void;
@@ -158,6 +175,13 @@ export interface CircTheme<C extends string = ThemeColorKey> {
    * above the box in `busLabel`.
    */
   busValue?: (args: BusValueContext<C>) => void;
+  /**
+   * Override how a hovered or host-highlighted component is marked, or pass a
+   * no-op to mark none. If absent, a ring is drawn around its box in
+   * `highlight`. Drawn by the canvas after every skin, for every kind, so a
+   * skin never has to read `hovered` itself — though it still may.
+   */
+  highlight?: (args: HighlightContext<C>) => void;
 }
 
 export const baseTheme: CircTheme = {
