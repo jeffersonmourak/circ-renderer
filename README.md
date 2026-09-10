@@ -305,3 +305,5 @@ bun run typecheck
 ```
 
 `test/fixtures/` holds compiled `.wasm` fixtures: v02 artifacts, the v03 `rom_lookup.wasm` / `ram_write_read.wasm` (memory records, ports and exports), plus a frozen `and_v01.wasm` that guards the v01 decode + scalar-ABI fallback path. The v01/v02 fixtures are never regenerated.
+
+`test/fixtures/layouts/*.layout.json`, the `.wasm` files they pair with and `invariants.txt` are the layout-parity corpus for `test/layout-parity.test.ts` and `test/layout-invariants.test.ts`: the compiler's `LayoutGrid` per fixture-mode, the artifact compiled from the same source at the same compiler commit, and the compiler's invariant counts. `test/fixtures/layouts/MANIFEST.md` names that commit and the vendoring rule; re-vendor all three together.
