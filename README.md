@@ -81,6 +81,29 @@ A single-bit pin keeps its click-to-toggle exactly as before.
 - `view.setHighlight(id | null)` highlights one component from outside the canvas — an editor cursor, a table header — through the same `hovered` flag the pointer drives, so a skin needs no second branch. `null` clears it, and an id with no box is a no-op.
 - `view.getLayout()` returns the `LayoutGrid` the canvas drew. A host needs it to map a declared name to a box: a collapsed subcircuit carries a synthetic id that exists only in the layout, never in `runtime.topology.components`.
 
+### Memories
+
+A `rom` or `ram` carries its shape in the artifact and none of its contents;
+they are runtime state the host loads and reads back. `CircRuntime` types
+that whole surface, so nothing has to reach through `raw`:
+
+```ts
+const [code] = runtime.memories();          // { id, name: "code", info: { kind: "rom", width: 8, addrWidth: 4 } }
+runtime.loadMemImage(code.id, bytes);       // ceil(W/8) little-endian bytes per word, at most 2^A words
+runtime.readMemWord(code.id, 3);            // { value, defined, width } — unknown until something loads it
+runtime.writeMemWord(code.id, 3, 0x7fn, 0xffn);
+runtime.storeMemImage(code.id);             // the contents back as an image, unknown words as zero
+runtime.clearMem(code.id);                  // every word unknown again
+```
+
+`memories()` lists top-level memories the runtime confirms, so a name from
+the source maps to an id without a second lookup. Every mutator returns the
+runtime's own status (`0` is success; the codes are in circ-compiler's
+`DOCS/wasm-api.md`), or `MEM_ABSENT` on an artifact built before memories
+existed — check `runtime.hasMemory` first to avoid that case. A mutator
+re-presents the memory's `out` at once, so `view.refreshState()` is enough
+afterwards; no `run()` is needed. A ram loads exactly as a rom does.
+
 `buildLayout` is a pure function — useful if you want to skip Canvas and render the layout to SVG, React, or anything else. It runs the same five-stage pipeline (collapse → columns → rows → place → route) that the Zig CLI's `--preview` uses, ported to TypeScript.
 
 ## Theming

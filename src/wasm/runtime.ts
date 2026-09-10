@@ -30,7 +30,7 @@ import {
  */
 type RuntimeAbi = "v1" | "v2";
 
-interface RuntimeExports {
+export interface RuntimeExports {
   memory: WebAssembly.Memory;
   /** Allocate `size` bytes in linear memory; returns a pointer the host
    * must write the topology blob to before calling `init()`. */
@@ -58,6 +58,40 @@ interface RuntimeExports {
   // Optional / future:
   reset?: () => void;
   deinit?: () => void;
+}
+
+/** A memory's shape, as the runtime itself reports it. */
+export interface MemInfo {
+  kind: "rom" | "ram";
+  /** W, the data width, 1..64. */
+  width: number;
+  /** A, the address width, 1..16. */
+  addrWidth: number;
+}
+
+/** A declared memory the runtime confirms: its id, its source name, its shape. */
+export interface Memory {
+  id: number;
+  name: string;
+  info: MemInfo;
+}
+
+/**
+ * What a memory mutator returns. `0` is success; the negative codes are the
+ * runtime's own and are listed in circ-compiler's `DOCS/wasm-api.md`. One is
+ * this module's: `MEM_ABSENT`, for an artifact built before memories existed,
+ * which has no memory family to refuse with.
+ */
+export type MemStatus = number;
+export const MEM_ABSENT: MemStatus = -100;
+
+/** `(kind << 16) | (W << 8) | A`, or a negative for anything that is not a memory. */
+function unpackMemInfo(packed: number): MemInfo | null {
+  if (packed < 0) return null;
+  const kind = (packed >> 16) & 0xff;
+  const k = kind === ComponentKind.Rom ? "rom" : kind === ComponentKind.Ram ? "ram" : null;
+  if (k === null) return null;
+  return { kind: k, width: (packed >> 8) & 0xff, addrWidth: packed & 0xff };
 }
 
 export interface LoadOptions {
@@ -320,6 +354,125 @@ export class CircRuntime {
     } catch {
       // ignore — the module may already be torn down
     }
+  }
+
+  // ---- memories ---------------------------------------------------------------
+  //
+  // A rom or ram carries its SHAPE in the artifact and nothing else: contents
+  // are runtime state the host loads and reads back. The eight exports below
+  // are the whole of that surface, typed here so a host never has to cast
+  // through `raw` and re-derive the packed info word or the staging-buffer
+  // dance itself. `memBuffer` may grow linear memory, so every byte view is
+  // taken AFTER it and never held across it.
+
+  /** Whether this artifact carries the memory family at all. */
+  get hasMemory(): boolean {
+    const e = this.exports;
+    return (
+      typeof e.getMemInfo === "function" &&
+      typeof e.memBuffer === "function" &&
+      typeof e.memLoad === "function" &&
+      typeof e.getMemValue === "function" &&
+      typeof e.getMemDefined === "function"
+    );
+  }
+
+  /** A memory's shape from the runtime's own answer, or null for anything
+   *  that is not a memory — including every id on an artifact without them. */
+  memInfo(id: number): MemInfo | null {
+    if (!this.exports.getMemInfo) return null;
+    return unpackMemInfo(this.exports.getMemInfo(id));
+  }
+
+  /**
+   * Every memory this circuit declares, by name, confirmed by the runtime.
+   *
+   * Top-level components only: a box with a non-empty `origin` came from
+   * inside a macro, and its name is not one the reader wrote or can address.
+   * A component the topology calls a memory but the runtime does not is a
+   * disagreement, and it is skipped rather than guessed at. First wins on a
+   * duplicate name, which is already a broken circuit.
+   */
+  memories(): Memory[] {
+    const out: Memory[] = [];
+    if (!this.hasMemory) return out;
+    const seen = new Set<string>();
+    for (const c of this._topology.components) {
+      if (c.kind !== ComponentKind.Rom && c.kind !== ComponentKind.Ram) continue;
+      if ((c.origin?.length ?? 0) !== 0 || !c.name || seen.has(c.name)) continue;
+      const info = this.memInfo(c.id);
+      if (!info) continue;
+      const declared = c.kind === ComponentKind.Rom ? "rom" : "ram";
+      if (info.kind !== declared) continue;
+      seen.add(c.name);
+      out.push({ id: c.id, name: c.name, info });
+    }
+    return out;
+  }
+
+  /** One cell, `(value, defined)` masked to the memory's width. A cell of a
+   *  non-memory, or of an artifact without memories, reads as unknown. */
+  readMemWord(id: number, addr: number): BitValue {
+    const info = this.memInfo(id);
+    if (!info || !this.exports.getMemValue || !this.exports.getMemDefined) {
+      return { value: 0n, defined: 0n, width: info?.width ?? 1 };
+    }
+    const mask = widthMask(info.width);
+    const value = BigInt.asUintN(64, this.exports.getMemValue(id, addr)) & mask;
+    const defined = BigInt.asUintN(64, this.exports.getMemDefined(id, addr)) & mask;
+    return { value: value & defined, defined, width: info.width };
+  }
+
+  /**
+   * Write one cell. `defined` of zero makes it unknown again. Masked to the
+   * width; the memory's own `out` follows at once, no `run()` needed.
+   *
+   * `MEM_ABSENT` means the artifact has no memory family at all. An id that
+   * is not a memory on an artifact that has one is refused by the runtime in
+   * its own code, so the two cases stay distinguishable.
+   */
+  writeMemWord(id: number, addr: number, value: bigint, defined: bigint): MemStatus {
+    if (!this.hasMemory || !this.exports.setMemWord) return MEM_ABSENT;
+    const info = this.memInfo(id);
+    const mask = info ? widthMask(info.width) : widthMask(64);
+    return this.exports.setMemWord(id, addr, value & mask, defined & mask);
+  }
+
+  /**
+   * Replace a memory's whole contents from a raw image: `ceil(W/8)` bytes per
+   * word, little-endian, at most `2^A` words. A shorter image leaves the rest
+   * unknown; an empty one clears. The runtime validates the image and returns
+   * its own code on refusal.
+   */
+  loadMemImage(id: number, bytes: Uint8Array): MemStatus {
+    const e = this.exports;
+    if (!this.hasMemory || !e.memBuffer || !e.memLoad) return MEM_ABSENT;
+    if (bytes.length === 0) return this.clearMem(id);
+    const ptr = e.memBuffer(id);
+    if (ptr < 0) return ptr;
+    // The view is taken here, after memBuffer, which may have grown memory;
+    // one taken earlier would be detached and the copy would land nowhere.
+    new Uint8Array(e.memory.buffer).set(bytes, ptr);
+    return e.memLoad(id, bytes.length);
+  }
+
+  /** The memory's contents as an image in the same layout `loadMemImage`
+   *  takes, with `value & defined` per word — an unknown word stores as
+   *  zero, since the format cannot say otherwise. Null on refusal. */
+  storeMemImage(id: number): Uint8Array | null {
+    const e = this.exports;
+    if (!this.hasMemory || !e.memBuffer || !e.memStore) return null;
+    const n = e.memStore(id);
+    if (n < 0) return null;
+    const ptr = e.memBuffer(id);
+    if (ptr < 0) return null;
+    return new Uint8Array(e.memory.buffer, ptr, n).slice();
+  }
+
+  /** Every word becomes unknown. */
+  clearMem(id: number): MemStatus {
+    if (!this.hasMemory || !this.exports.memClear) return MEM_ABSENT;
+    return this.exports.memClear(id);
   }
 
   /** Escape hatch for callers that need direct access to the WASM exports. */

@@ -11,8 +11,8 @@ import { CircRuntime, type LoadOptions } from "./wasm/runtime";
 import { CircCanvas, type RenderOptions } from "./render/canvas";
 
 export * from "./wasm/topology";
-export { CircRuntime } from "./wasm/runtime";
-export type { LoadOptions } from "./wasm/runtime";
+export { CircRuntime, MEM_ABSENT } from "./wasm/runtime";
+export type { LoadOptions, RuntimeExports, MemInfo, Memory, MemStatus } from "./wasm/runtime";
 
 export {
   buildLayout,
