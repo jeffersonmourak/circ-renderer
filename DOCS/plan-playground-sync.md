@@ -250,6 +250,14 @@ wire, cell, arcRadius?)` in `src/render/wire-path.ts` with `wirePath` as its
 default painter and a theme's hook cannot disagree about a jump. The
 "older renderer" branch named above had already gone with Phase 1 (G11).
 
+**Site half shipped** as playground `9e60f42`: both local `CircView` types
+and their casts gone (the theme module is typed through JSDoc, exporting
+`PaletteKey`), `ComponentKind` named from `circ-renderer/topology` in
+`source-link.ts` and the playground, the dead `ROM_KIND`/`RAM_KIND`
+deleted, and the theme's wire painter on `wireStyleOf` + `traceWire` with a
+`wireBus` colour in both palettes. That closes the plan's five phases; only
+Phase 6 (G03) stays parked.
+
 ---
 
 ## Recurring traps
