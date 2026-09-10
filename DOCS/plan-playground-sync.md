@@ -174,10 +174,20 @@ on any canvas on the site opens a field seeded with its current value; typing
   version. `renderer-pin.test.ts`: probe `setInputValue`, `getInputValue`,
   `boxOf`.
 - `Playground.astro`: `sim.pins` becomes `Map<string, BitValue>`; listen to
-  `onPinChange`; replay through `setInputValue`; pass `onPinEdit` returning
-  `true` and open the playground's own field using `parseWord` and the stored
-  `valueFormat`; pass `valueFormat` so the badge matches the setting.
+  `onPinChange`; replay through `setInputValue`; pass `valueFormat` so the
+  badge and a bare entry follow the reader's setting, and rebuild the canvas
+  when that setting changes, since the canvas captures it at construction.
+  **Shipped without `onPinEdit`.** The plan had the playground open its own
+  field to keep its own parser and format; `valueFormat` covers the format,
+  and the parser is the same code ported with the same tests, so a second
+  field would have been a second thing to keep in step for no gain. The hook
+  stays for a host that wants a different UI, which the playground is not.
+  The unreachable "older renderer" branch (G11) went in the same edit, since
+  the replay it guarded now requires a method the pin test asserts.
 - `LiveCanvas.astro`: nothing. That is the point.
+
+**Shipped** as renderer `9694198` (`2.2.0-alpha.1`) and the site pin bump
+that follows it.
 
 ## Phase 2 — memory through a typed door
 
