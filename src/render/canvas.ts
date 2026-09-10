@@ -11,6 +11,7 @@ import {
 } from "../utils/theme";
 import { pickSkin } from "./skins";
 import { entryLength, formatPinValue, parsePinValue, type ValueFormat } from "./pin-value";
+import { defaultArcRadius, traceWire } from "./wire-path";
 
 /**
  * What a host receives when a reader clicks a multi-bit pin and the host has
@@ -837,41 +838,11 @@ export class CircCanvas<C extends string = ThemeColorKey> {
         ctx.stroke();
       }
     }
-    // For each segment, draw its line — horizontal segments arc over recorded
-    // crossings so overlapping signals read as separate wires.
-    for (const seg of wire.segments) {
-      const horiz = seg.from.y === seg.to.y;
-      const startX = seg.from.x * cell + cell / 2;
-      const startY = seg.from.y * cell + cell / 2;
-      const endX = seg.to.x * cell + cell / 2;
-      const endY = seg.to.y * cell + cell / 2;
-      if (!horiz) {
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(endX, endY);
-        ctx.stroke();
-        continue;
-      }
-      const xs = [startX, endX].sort((a, b) => a - b);
-      const segLo = xs[0], segHi = xs[1];
-      const y = startY;
-      // Crossings landing on this exact horizontal segment.
-      const jumps = wire.crossings
-        .filter((c) => c.y === seg.from.y && c.x * cell + cell / 2 >= segLo && c.x * cell + cell / 2 <= segHi)
-        .map((c) => c.x * cell + cell / 2)
-        .sort((a, b) => a - b);
-      ctx.beginPath();
-      let cursor = segLo;
-      const arcRadius = cell * 0.4;
-      for (const jx of jumps) {
-        ctx.moveTo(cursor, y);
-        ctx.lineTo(jx - arcRadius, y);
-        ctx.arc(jx, y, arcRadius, Math.PI, 0, false); // arc above the line
-        cursor = jx + arcRadius;
-      }
-      ctx.moveTo(cursor, y);
-      ctx.lineTo(segHi, y);
-      ctx.stroke();
-    }
+    // The route itself: every segment, with horizontal ones arcing over their
+    // recorded crossings. Traced by the same function a theme's `wire` hook
+    // can call, so the two cannot disagree about where a jump goes.
+    ctx.beginPath();
+    traceWire(ctx, wire, cell, defaultArcRadius(cell));
+    ctx.stroke();
   }
 }

@@ -243,6 +243,13 @@ three `as any` casts with it. The unreachable "older renderer" branch at
 existed, is deleted. `circ-theme.mjs`'s wire renderer takes `value` and styles
 a bus as a bus.
 
+**Renderer half shipped** as `2.2.0-alpha.5`: the `exports` map (`.`,
+`./topology`, `./package.json`), and the wire tracer as `traceWire(path,
+wire, cell, arcRadius?)` in `src/render/wire-path.ts` with `wirePath` as its
+`Path2D` form — the canvas's own `drawWire` calls the same function, so the
+default painter and a theme's hook cannot disagree about a jump. The
+"older renderer" branch named above had already gone with Phase 1 (G11).
+
 ---
 
 ## Recurring traps

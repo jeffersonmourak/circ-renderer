@@ -47,6 +47,8 @@ export {
   type ParsedPinValue,
 } from "./render/pin-value";
 
+export { traceWire, wirePath, defaultArcRadius } from "./render/wire-path";
+
 export {
   baseTheme,
   defaultColors,

@@ -179,6 +179,38 @@ await renderCircuit({ url: "/static/foo.wasm", theme });
 | `macro`          | subcircuit (collapsed) box border             |
 | `highlight`      | ring around a hovered or host-highlighted box |
 
+### Drawing a wire yourself
+
+A theme's `wire` hook receives the routed wire, its width-aware `value` and a
+collapsed `signal`. The route is segments, and a horizontal segment arcs over
+every crossing the router recorded on it; `traceWire` traces that shape into
+any `CanvasPath` — a context after `beginPath()`, or a `Path2D` through
+`wirePath` — so a hook strokes it in its own colour and width without
+re-deriving the jumps:
+
+```ts
+import { traceWire, wireStyleOf, wireColorKey } from "circ-renderer";
+
+wire: ({ ctx, cell, wire, value, theme }) => {
+  ctx.strokeStyle = theme.colors[wireColorKey(wireStyleOf(value))];
+  ctx.lineWidth = wireStyleOf(value) === "bus" ? 5 : 3;
+  ctx.beginPath();
+  traceWire(ctx, wire, cell);          // third argument: arc radius, 0.4 cells by default
+  ctx.stroke();
+}
+```
+
+The path is the route only. The stubs from a source box into its `out` port
+and from an `in` port into a destination box are drawn by the default wire
+painter and are the hook's to draw, or not, when it takes over.
+
+### Importing just the topology
+
+`circ-renderer/topology` exports the decoder and its types — `ComponentKind`,
+`decodeFullTopology`, `BitValue`, the port bytes — and nothing else. A host
+that only needs to name a kind byte in a bundle that must not carry the
+canvas imports from there; the root export is unchanged.
+
 ### Highlight
 
 A hovered component, and one the host marks with `view.setHighlight(id)`, gets
@@ -257,7 +289,7 @@ bun run dev
 ## Tests
 
 ```bash
-bun test        # decode (v01..v03), runtime ABI (incl. memory exports), and layout tests
+bun test        # decode (v01..v03), runtime ABI (incl. memory exports), layout, canvas, and packaging tests
 bun run typecheck
 ```
 
