@@ -19,7 +19,6 @@ export {
   collapse,
   layer,
   order,
-  place,
   route,
 } from "./layout";
 export type {

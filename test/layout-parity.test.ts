@@ -42,15 +42,9 @@ function differingWires(ts: Projected, zig: Projected): string[] {
  * moves in when a run shows it equal, and out when it does not.
  */
 export const MATCHES_TODAY: ReadonlySet<string> = new Set<string>([
-  "builtin_xnor opaque",
-  "builtin_xor opaque",
   "chain opaque",
-  "clean_gated_feedback opaque",
-  "edge_single_component opaque",
-  "fan_in opaque",
   "fan_out opaque",
   "multi_led opaque",
-  "parallel_leftward_detours opaque",
   "single_gate opaque",
 ]);
 
