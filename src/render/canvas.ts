@@ -87,9 +87,9 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   /** What the canvas drove each root input pin to. Width-aware, so a bus
    *  value survives a click on a neighbouring width-1 pin. */
   private inputState = new Map<number, BitValue>();
-  /** The open value field, if any. One at a time: opening a second closes
+  /** The open value editor, if any. One at a time: opening a second closes
    *  the first uncommitted, the way a reader would expect. */
-  private editor: { id: number; el: HTMLInputElement; off: () => void } | null = null;
+  private editor: { id: number; root: HTMLElement; off: () => void } | null = null;
   private hoverId: number | null = null;
   /** Host-driven highlight, kept apart from `hoverId` so the canvas's own
    *  pointer bookkeeping can never clobber it. */
@@ -396,15 +396,24 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     return this.runtime.readValue(id);
   }
 
-  // ---- the value field ------------------------------------------------------
+  // ---- the value editor -----------------------------------------------------
 
   /**
-   * Open a field over a bus pin, unless the host takes the gesture over.
+   * Open an editor under a bus pin, unless the host takes the gesture over.
    *
-   * The field is one `<input>` on `document.body`, positioned `fixed` from the
-   * canvas's client rect: the canvas owns no parent and cannot position anything
-   * relative to one. It closes uncommitted on blur, Escape, scroll and resize,
-   * which is simpler and more honest than following the page around.
+   * The editor is a small dialog on `document.body`, positioned `fixed` from
+   * the canvas's client rect: the canvas owns no parent and cannot position
+   * anything relative to one. It holds a text field, a slider over the pin's
+   * whole range when that range fits a number, and three buttons: Apply drives
+   * what the field says, Clear drives zero, Close drives nothing. Enter and
+   * Escape are Apply and Close. A pointer down outside the dialog, focus
+   * leaving it for somewhere else on the page, a scroll and a resize each
+   * close it uncommitted, which is simpler and more honest than following the
+   * page around.
+   *
+   * Class names (`circ-pin-editor`, `circ-pin-editor__field`, `__slider`,
+   * `__name`, `__actions`, `__apply`, `__clear`, `__close`) are stable, so a
+   * host can restyle it; the inline styles are only a legible default.
    */
   private openEditor(id: number): void {
     this.closeEditor();
@@ -427,30 +436,128 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     }
     if (typeof document === "undefined") return;
 
+    const width = current.width;
+    const mask = widthMask(width);
+    const format = this.valueFormat;
+    const name = this.layout.components.find((c) => c.id === id)?.name ?? `pin ${id}`;
+    const colors = this.theme.colors as Partial<Record<ThemeColorKey, string>>;
+    const font = this.theme.font ?? `${Math.round(this.cell)}px ui-monospace, monospace`;
     const rect = this.canvas.getBoundingClientRect();
-    const el = document.createElement("input");
-    el.type = "text";
-    el.value = formatPinValue(current, this.valueFormat);
-    el.maxLength = entryLength(current.width, this.valueFormat);
-    el.setAttribute("aria-label", `Value of pin ${id}, ${current.width} bits`);
-    el.setAttribute("aria-invalid", "false");
-    el.setAttribute("autocomplete", "off");
-    el.setAttribute("spellcheck", "false");
-    Object.assign(el.style, {
+
+    const root = document.createElement("div");
+    root.className = "circ-pin-editor";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-label", `Value of ${name}, ${width} bit${width === 1 ? "" : "s"}`);
+    Object.assign(root.style, {
       position: "fixed",
       left: `${rect.left + box.x}px`,
-      top: `${rect.top + box.y}px`,
-      width: `${Math.max(box.width, this.cell * 4)}px`,
-      height: `${box.height}px`,
+      top: `${rect.top + box.y + box.height + 4}px`,
+      display: "grid",
+      gap: "6px",
+      padding: "8px",
+      minWidth: "180px",
       boxSizing: "border-box",
-      margin: "0",
-      padding: "0 2px",
-      font: this.theme.font ?? `${Math.round(this.cell)}px ui-monospace, monospace`,
-      textAlign: "center",
+      background: colors.background ?? "#ffffff",
+      color: colors.label ?? "#212529",
+      border: `1px solid ${colors.stroke ?? "#212529"}`,
+      borderRadius: "6px",
+      boxShadow: "0 4px 16px rgba(0, 0, 0, 0.18)",
+      font,
       zIndex: "2147483647",
     });
 
+    const label = document.createElement("span");
+    label.className = "circ-pin-editor__name";
+    label.textContent = `${name} · ${width} bit${width === 1 ? "" : "s"}`;
+    Object.assign(label.style, { opacity: "0.75", fontSize: "0.85em" });
+    root.appendChild(label);
+
+    const field = document.createElement("input");
+    field.type = "text";
+    field.className = "circ-pin-editor__field";
+    field.value = formatPinValue(current, format);
+    field.maxLength = entryLength(width, format);
+    field.setAttribute("aria-label", `Value of ${name}, ${width} bits`);
+    field.setAttribute("aria-invalid", "false");
+    field.setAttribute("autocomplete", "off");
+    field.setAttribute("spellcheck", "false");
+    Object.assign(field.style, {
+      boxSizing: "border-box",
+      width: "100%",
+      margin: "0",
+      padding: "2px 4px",
+      font,
+      textAlign: "center",
+      color: "inherit",
+      background: "transparent",
+      border: `1px solid ${colors.stroke ?? "#212529"}`,
+      borderRadius: "4px",
+    });
+    root.appendChild(field);
+
+    // A slider spans the pin's range only when that range is a number the
+    // slider can hold exactly; past 53 bits the field is the only entry.
+    const slider = width <= 53 ? document.createElement("input") : null;
+    if (slider) {
+      slider.type = "range";
+      slider.className = "circ-pin-editor__slider";
+      slider.min = "0";
+      slider.max = mask.toString();
+      slider.step = "1";
+      slider.value = ((current.value & current.defined & mask)).toString();
+      slider.setAttribute("aria-label", `Slide the value of ${name}`);
+      Object.assign(slider.style, { width: "100%", margin: "0" });
+      root.appendChild(slider);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "circ-pin-editor__actions";
+    Object.assign(actions.style, { display: "flex", gap: "4px", justifyContent: "flex-end" });
+    const button = (kind: "apply" | "clear" | "close", text: string) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `circ-pin-editor__${kind}`;
+      b.textContent = text;
+      Object.assign(b.style, {
+        font,
+        fontSize: "0.85em",
+        padding: "2px 8px",
+        cursor: "pointer",
+        color: "inherit",
+        background: "transparent",
+        border: `1px solid ${colors.stroke ?? "#212529"}`,
+        borderRadius: "4px",
+      });
+      actions.appendChild(b);
+      return b;
+    };
+    const apply = button("apply", "Apply");
+    const clear = button("clear", "Clear");
+    const close = button("close", "Close");
+    root.appendChild(actions);
+
+    const complain = (message: string) => {
+      // Stay open. A refusal that closes the editor throws away what the
+      // reader typed and makes them find the pin again to try once more.
+      field.setAttribute("aria-invalid", "true");
+      field.title = message;
+      field.focus();
+      field.select();
+    };
+    const answered = () => {
+      if (field.getAttribute("aria-invalid") === "true") {
+        field.setAttribute("aria-invalid", "false");
+        field.title = "";
+      }
+    };
+
     let done = false;
+    const drive = (value: bigint, defined: bigint) => {
+      done = true;
+      this.closeEditor();
+      this.setInputValue(id, value, defined);
+      this.announce(id);
+    };
     const finish = (commit: boolean) => {
       if (done) return;
       if (!commit) {
@@ -458,62 +565,102 @@ export class CircCanvas<C extends string = ThemeColorKey> {
         this.closeEditor();
         return;
       }
-      const parsed = parsePinValue(el.value, current.width, this.valueFormat);
+      const parsed = parsePinValue(field.value, width, format);
       if (!parsed.ok) {
-        // Stay open. A refusal that closes the field throws away what the
-        // reader typed and makes them find the pin again to try once more.
-        el.setAttribute("aria-invalid", "true");
-        el.title = parsed.message;
-        el.focus();
-        el.select();
+        complain(parsed.message);
         return;
       }
-      done = true;
-      this.closeEditor();
-      this.setInputValue(id, parsed.value, parsed.defined);
-      this.announce(id);
+      drive(parsed.value, parsed.defined);
     };
 
     const onKey = (e: KeyboardEvent) => {
       e.stopPropagation();
       if (e.key === "Enter") { e.preventDefault(); finish(true); }
       else if (e.key === "Escape") { e.preventDefault(); finish(false); }
-      else if (el.getAttribute("aria-invalid") === "true") {
-        // Typing again is the reader answering the complaint.
-        el.setAttribute("aria-invalid", "false");
-        el.title = "";
-      }
+      else answered(); // typing again is the reader answering the complaint
     };
-    // Clicking away from a value that will not parse abandons it rather than
-    // trapping focus in the field.
-    const onBlur = () => finish(false);
+    // The field and the slider say the same number: a legal, fully known
+    // entry moves the slider, and a slide rewrites the field in the format.
+    const onType = () => {
+      answered();
+      if (!slider) return;
+      const parsed = parsePinValue(field.value, width, format);
+      if (parsed.ok && parsed.defined === mask) slider.value = parsed.value.toString();
+    };
+    const onSlide = () => {
+      if (!slider) return;
+      answered();
+      field.value = formatPinValue({ value: BigInt(slider.value), defined: mask, width }, format);
+    };
+    const onApply = () => finish(true);
+    const onClear = () => { if (!done) drive(0n, mask); };
+    const onClose = () => finish(false);
+    // Clicking away closes, uncommitted, even from a value that will not
+    // parse: the editor never traps the pointer. Focus leaving for somewhere
+    // else on the page is the keyboard's way of saying the same thing; a
+    // focusout with no destination (a button that takes no focus on click,
+    // the window losing focus) is not, and is left alone.
+    const onPointerDown = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && root.contains(target)) return;
+      finish(false);
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      const to = e.relatedTarget as Node | null;
+      if (!to || root.contains(to)) return;
+      finish(false);
+    };
     const onMove = () => finish(false);
-    el.addEventListener("keydown", onKey);
-    el.addEventListener("blur", onBlur);
+
+    field.addEventListener("keydown", onKey);
+    field.addEventListener("input", onType);
+    slider?.addEventListener("input", onSlide);
+    slider?.addEventListener("keydown", onKey);
+    apply.addEventListener("click", onApply);
+    clear.addEventListener("click", onClear);
+    close.addEventListener("click", onClose);
+    root.addEventListener("focusout", onFocusOut);
+    document.addEventListener("pointerdown", onPointerDown, true);
     if (typeof window !== "undefined") {
       window.addEventListener("scroll", onMove, true);
       window.addEventListener("resize", onMove);
     }
     const off = () => {
-      el.removeEventListener("keydown", onKey);
-      el.removeEventListener("blur", onBlur);
+      field.removeEventListener("keydown", onKey);
+      field.removeEventListener("input", onType);
+      slider?.removeEventListener("input", onSlide);
+      slider?.removeEventListener("keydown", onKey);
+      apply.removeEventListener("click", onApply);
+      clear.removeEventListener("click", onClear);
+      close.removeEventListener("click", onClose);
+      root.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("pointerdown", onPointerDown, true);
       if (typeof window !== "undefined") {
         window.removeEventListener("scroll", onMove, true);
         window.removeEventListener("resize", onMove);
       }
     };
-    this.editor = { id, el, off };
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
+    this.editor = { id, root, off };
+    document.body.appendChild(root);
+    // Keep the dialog on screen: a pin at the right or bottom edge would
+    // otherwise open it partly off the page.
+    if (typeof window !== "undefined") {
+      const r = root.getBoundingClientRect();
+      const overRight = r.right - window.innerWidth;
+      const overBottom = r.bottom - window.innerHeight;
+      if (overRight > 0) root.style.left = `${Math.max(0, rect.left + box.x - overRight - 8)}px`;
+      if (overBottom > 0) root.style.top = `${Math.max(0, rect.top + box.y - r.height - 4)}px`;
+    }
+    field.focus();
+    field.select();
   }
 
   private closeEditor(): void {
     if (!this.editor) return;
-    const { el, off } = this.editor;
+    const { root, off } = this.editor;
     this.editor = null;
     off();
-    el.remove();
+    root.remove();
   }
 
   /** Both change callbacks, for a change the reader made. */

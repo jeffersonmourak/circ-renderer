@@ -10,7 +10,7 @@ import { CircRuntime } from "../src/wasm/runtime";
 import { CircCanvas } from "../src/render/canvas";
 import { baseTheme } from "../src/utils/theme";
 import type { SkinContext } from "../src/utils/theme";
-import { installStubDocument } from "./canvas-stub";
+import { installStubDocument, makeStubElement } from "./canvas-stub";
 
 const FIX = join(import.meta.dir, "fixtures");
 let stub: ReturnType<typeof installStubDocument>;
@@ -230,13 +230,23 @@ test("a click on a bus pin opens a field and drives nothing", async () => {
   expect(toggles).toEqual([]);
   expect(stub.inputs).toHaveLength(1);
   const field = stub.inputs[0];
-  expect(stub.body.children).toContain(field);
+  // The field sits in a dialog on the body, positioned fixed, with a slider
+  // over the pin's range and the three buttons.
+  expect(stub.dialogs).toHaveLength(1);
+  const dialog = stub.dialogs[0];
+  expect(stub.body.children).toContain(dialog);
+  expect(dialog.contains(field)).toBe(true);
+  expect(dialog.style.position).toBe("fixed");
+  expect(dialog.getAttribute("aria-label")).toBe("Value of pc, 4 bits");
   expect(field.focused).toBe(true);
   expect(field.selected).toBe(true);
   // Seeded from the RUNTIME's value: it drives every input to Low at load, so
   // a fresh pin reads 0x0 here and in the badge, never `?` over `0x0`.
   expect(field.value).toBe("0x0");
-  expect(field.style.position).toBe("fixed");
+  expect(stub.sliders).toHaveLength(1);
+  expect([stub.sliders[0].min, stub.sliders[0].max, stub.sliders[0].value]).toEqual(["0", "15", "0"]);
+  expect(stub.buttons.map((b) => b.textContent)).toEqual(["Apply", "Clear", "Close"]);
+  expect(stub.buttons.map((b) => b.type)).toEqual(["button", "button", "button"]);
 });
 
 test("what is typed is what is driven, and both callbacks hear it", async () => {
@@ -286,7 +296,7 @@ test("a refused value keeps the field open and says why", async () => {
   expect(field.removed).toBe(true);
 });
 
-test("Escape, blur, scroll and resize each close the field uncommitted", async () => {
+test("Escape, Close, a pointer down outside, focus leaving, scroll and resize each close the editor uncommitted", async () => {
   const rt = await load("rom_lookup.wasm");
   const canvas = new CircCanvas(rt, {});
   const a = pin(canvas, "pc");
@@ -299,13 +309,24 @@ test("Escape, blur, scroll and resize each close the field uncommitted", async (
     field.value = "9";
     return field;
   };
+  const outside = makeStubElement("div");
 
   let field = open();
   field.press("Escape");
   expect(field.removed).toBe(true);
 
   field = open();
-  field.blur();
+  stub.buttons[stub.buttons.length - 1].click(); // Close
+  expect(field.removed).toBe(true);
+
+  field = open();
+  stub.document.dispatchEvent("pointerdown", { target: outside });
+  expect(field.removed).toBe(true);
+
+  field = open();
+  field.dispatchEvent("focusout", { target: field, relatedTarget: outside });
+  // The dialog listens; the stub does not bubble a bare dispatch, so aim it.
+  stub.dialogs[stub.dialogs.length - 1].dispatchEvent("focusout", { target: field, relatedTarget: outside });
   expect(field.removed).toBe(true);
 
   field = open();
@@ -318,8 +339,105 @@ test("Escape, blur, scroll and resize each close the field uncommitted", async (
 
   // Nothing above drove the pin.
   expect(rt.readValue(a.id)).toEqual(before);
-  // …and each close took its window listeners with it.
+  // …and each close took its window and document listeners with it.
   for (const set of stub.window.listeners.values()) expect(set.size).toBe(0);
+  for (const set of stub.document.listeners.values()) expect(set.size).toBe(0);
+});
+
+test("a pointer down or a focus move inside the dialog leaves it open", async () => {
+  // The Safari case: a button takes no focus on click, so the field's blur has
+  // no destination. Closing there would make Apply unreachable by mouse.
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const a = pin(canvas, "pc");
+  stub.created[0].dispatchEvent("click", centre(a));
+  const field = stub.inputs[0];
+  const dialog = stub.dialogs[0];
+
+  stub.document.dispatchEvent("pointerdown", { target: stub.sliders[0] });
+  dialog.dispatchEvent("focusout", { target: field, relatedTarget: stub.sliders[0] });
+  dialog.dispatchEvent("focusout", { target: field, relatedTarget: null });
+  field.blur();
+  expect(field.removed).toBe(false);
+  expect(dialog.removed).toBe(false);
+});
+
+test("the slider and the field say the same number, in the chosen format", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, { valueFormat: "binary" });
+  const a = pin(canvas, "pc");
+  stub.created[0].dispatchEvent("click", centre(a));
+  const field = stub.inputs[0];
+  const slider = stub.sliders[0];
+
+  // Sliding rewrites the field in the format, and drives nothing yet.
+  slider.value = "10";
+  slider.dispatchEvent("input");
+  expect(field.value).toBe("0b1010");
+  expect(rt.readValue(a.id)).toEqual({ value: 0n, defined: 0xfn, width: 4 });
+
+  // Typing a legal, fully known value moves the slider; a prefix overrides.
+  field.value = "0x7";
+  field.dispatchEvent("input");
+  expect(slider.value).toBe("7");
+  // A value the pin cannot hold, or one with unknown bits, leaves it be.
+  field.value = "10101";
+  field.dispatchEvent("input");
+  expect(slider.value).toBe("7");
+  field.value = "?";
+  field.dispatchEvent("input");
+  expect(slider.value).toBe("7");
+
+  // Sliding after a refusal answers the complaint.
+  field.value = "10101";
+  field.press("Enter");
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  slider.value = "3";
+  slider.dispatchEvent("input");
+  expect(field.getAttribute("aria-invalid")).toBe("false");
+  expect(field.value).toBe("0b0011");
+});
+
+test("Apply drives what the field says, Clear drives zero, and each closes", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const changes: [number, bigint, bigint][] = [];
+  const canvas = new CircCanvas(rt, { onPinChange: (id, v) => changes.push([id, v.value, v.defined]) });
+  const a = pin(canvas, "pc");
+  const el = stub.created[0];
+  const [apply, clear] = [0, 1];
+
+  el.dispatchEvent("click", centre(a));
+  stub.sliders[0].value = "12";
+  stub.sliders[0].dispatchEvent("input");
+  stub.buttons[apply].click();
+  expect(rt.readValue(a.id)).toEqual({ value: 12n, defined: 0xfn, width: 4 });
+  expect(stub.dialogs[0].removed).toBe(true);
+
+  // Apply on a value the pin cannot hold complains and stays, like Enter.
+  el.dispatchEvent("click", centre(a));
+  stub.inputs[1].value = "1f";
+  stub.buttons[3 + apply].click();
+  expect(stub.dialogs[1].removed).toBe(false);
+  expect(stub.inputs[1].getAttribute("aria-invalid")).toBe("true");
+  expect(rt.readValue(a.id)).toEqual({ value: 12n, defined: 0xfn, width: 4 });
+
+  // Clear is a one-click zero: it ignores the field, drives 0 and closes.
+  stub.buttons[3 + clear].click();
+  expect(rt.readValue(a.id)).toEqual({ value: 0n, defined: 0xfn, width: 4 });
+  expect(stub.dialogs[1].removed).toBe(true);
+  expect(changes).toEqual([[a.id, 12n, 0xfn], [a.id, 0n, 0xfn]]);
+});
+
+test("the editor seeds the slider from the driven value and opens under the pin's box", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const a = pin(canvas, "pc");
+  canvas.setInputValue(a.id, 9n, 0xfn);
+  stub.created[0].dispatchEvent("click", centre(a));
+  expect(stub.sliders[0].value).toBe("9");
+  const box = canvas.boxOf(a.id)!;
+  expect(stub.dialogs[0].style.top).toBe(`${box.y + box.height + 4}px`);
+  expect(stub.dialogs[0].style.left).toBe(`${box.x}px`);
 });
 
 test("opening a second field closes the first", async () => {

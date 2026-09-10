@@ -57,13 +57,24 @@ const view    = new CircCanvas(runtime, { cell: 14 });
 
 ### Driving a bus pin
 
-A click on a pin wider than one bit opens a small text field over the pin,
-seeded with its current value. Enter drives what was typed; Escape, clicking
-away, scrolling or resizing closes it without driving anything. The field
-accepts the same spellings as the circ playground's memory grid: hex by
-default, `0x` and `0b` prefixes override, `_` groups digits, and `?` or an
-empty field means unknown. A value the pin cannot hold keeps the field open
-with the reason as its tooltip.
+A click on a pin wider than one bit opens a small dialog under the pin: a
+text field seeded with its current value, a slider over the pin's whole range
+(for pins up to 53 bits; wider ones get the field alone), and three buttons.
+**Apply** drives what the field says, **Clear** drives zero, **Close** drives
+nothing; Enter and Escape are Apply and Close. The field and the slider say
+the same number — a legal entry moves the slider, a slide rewrites the field
+in the chosen format — and nothing is driven until Apply. Clicking anywhere
+outside the dialog, tabbing out of it, scrolling or resizing closes it without
+driving anything. The field accepts the same spellings as the circ
+playground's memory grid: hex by default, `0x` and `0b` prefixes override,
+`_` groups digits, and `?` or an empty field means unknown. A value the pin
+cannot hold keeps the dialog open with the reason as the field's tooltip.
+
+The dialog is appended to `document.body` with stable class names —
+`circ-pin-editor`, and `circ-pin-editor__name`, `__field`, `__slider`,
+`__actions`, `__apply`, `__clear`, `__close` on its parts — so a host's
+stylesheet can restyle it; the inline styles are a legible default drawn from
+the theme's `background`, `label` and `stroke`.
 
 A single-bit pin keeps its click-to-toggle exactly as before.
 
