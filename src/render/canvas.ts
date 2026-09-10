@@ -10,13 +10,20 @@ import {
   wireStyleOf,
 } from "../utils/theme";
 import { pickSkin } from "./skins";
+import { entryLength, formatPinValue, parsePinValue, type ValueFormat } from "./pin-value";
 
-/** Format a bus value as a fixed-width hex badge; `?` if any bit is unknown. */
-function formatBus(v: BitValue): string {
-  const mask = widthMask(v.width);
-  if ((v.defined & mask) !== mask) return "?";
-  const digits = Math.ceil(v.width / 4);
-  return "0x" + (v.value & mask).toString(16).toUpperCase().padStart(digits, "0");
+/**
+ * What a host receives when a reader clicks a multi-bit pin and the host has
+ * asked to handle the entry itself. `box` is in CSS pixels relative to the
+ * canvas element, so a host can anchor its own field over the pin.
+ */
+export interface PinEditRequest {
+  id: number;
+  value: BitValue;
+  box: { x: number; y: number; width: number; height: number };
+  /** Drive the pin and close. Masked to the pin's width. */
+  commit: (value: bigint, defined: bigint) => void;
+  cancel: () => void;
 }
 
 export interface RenderOptions<C extends string = ThemeColorKey> {
@@ -37,6 +44,27 @@ export interface RenderOptions<C extends string = ThemeColorKey> {
    */
   onPinToggle?: (id: number, signal: Signal) => void;
   /**
+   * Called after a reader changed an input pin, with its whole value: a
+   * width-1 toggle, or a value typed into a bus pin. This is the callback to
+   * mirror, and `getInputValue` is the other way to read the same thing.
+   * `onPinToggle` is kept for hosts that predate it, and is LOSSY for a bus —
+   * it reports `signalOf(value)`, which collapses any mixed bus to High.
+   * Neither fires for a host's own `setInputValue` / `setInputSignal` call.
+   */
+  onPinChange?: (id: number, value: BitValue) => void;
+  /**
+   * Called when a reader clicks a pin wider than one bit. Return `true` to
+   * say the host has opened its own editor; the built-in field then stays
+   * closed. Return nothing to let the canvas open its field as usual.
+   */
+  onPinEdit?: (req: PinEditRequest) => boolean | void;
+  /**
+   * The base a bare (unprefixed) typed value is read in, and the base the bus
+   * badge above each multi-bit box is written in. Default `hex`. An explicit
+   * `0x` or `0b` in the field overrides it either way.
+   */
+  valueFormat?: ValueFormat;
+  /**
    * Called when the pointer moves onto a different component box, and with
    * `null` when it leaves the canvas. Fires only on a change, so a host can
    * drive an editor highlight straight from it without debouncing.
@@ -55,7 +83,12 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   private ctx: CanvasRenderingContext2D;
   private layout: LayoutGrid;
   private signals = new Map<number, BitValue>();
-  private inputState = new Map<number, Signal>();
+  /** What the canvas drove each root input pin to. Width-aware, so a bus
+   *  value survives a click on a neighbouring width-1 pin. */
+  private inputState = new Map<number, BitValue>();
+  /** The open value field, if any. One at a time: opening a second closes
+   *  the first uncommitted, the way a reader would expect. */
+  private editor: { id: number; el: HTMLInputElement; off: () => void } | null = null;
   private hoverId: number | null = null;
   /** Host-driven highlight, kept apart from `hoverId` so the canvas's own
    *  pointer bookkeeping can never clobber it. */
@@ -145,6 +178,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   private get theme(): CircTheme<string> {
     return (this.options.theme as CircTheme<string> | undefined) ?? (baseTheme as CircTheme<string>);
   }
+  private get valueFormat(): ValueFormat { return this.options.valueFormat ?? "hex"; }
 
   /** Resize canvas to match the grid extents at the current cell size. */
   resize(): void {
@@ -176,6 +210,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   }
 
   destroy(): void {
+    this.closeEditor();
     for (const off of this.listeners) off();
     this.listeners = [];
     this.canvas.remove();
@@ -187,9 +222,18 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     const onClick = (e: MouseEvent) => {
       const id = this.componentAtEvent(e);
       if (id === null || !this.isToggleable(id)) return;
-      const next: Signal = this.inputState.get(id) === 1 ? 0 : 1;
+      // A bus is a value, not a switch: a click opens a field rather than
+      // driving every bit at once. A single bit keeps its toggle exactly.
+      if (this.widthOf(id) > 1) {
+        this.openEditor(id);
+        return;
+      }
+      const current = this.currentValue(id);
+      const isHigh = (current.defined & 1n) === 1n && (current.value & 1n) === 1n;
+      const next: Signal = isHigh ? 0 : 1;
       this.setInputSignal(id, next);
       this.options.onPinToggle?.(id, next);
+      this.options.onPinChange?.(id, this.getInputValue(id)!);
     };
     this.canvas.addEventListener("pointermove", onMove);
     this.canvas.addEventListener("pointerleave", onLeave);
@@ -242,9 +286,199 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
   setInputSignal(id: number, signal: Signal): void {
     if (!this.isToggleable(id)) return;
-    this.inputState.set(id, signal);
-    this.runtime.setPinAndRun(id, signal);
+    const mask = widthMask(this.widthOf(id));
+    if (signal === 2) this.setInputValue(id, 0n, 0n);
+    else this.setInputValue(id, signal === 1 ? mask : 0n, mask);
+  }
+
+  /**
+   * Drive an input pin to an exact value and redraw. The width-aware sibling
+   * of `setInputSignal`, and what a bus needs: `value` and `defined` are masked
+   * to the pin's width, so a stray high bit cannot cross the boundary. Ignored
+   * for anything but a root input pin. Fires no callback — the host called it.
+   */
+  setInputValue(id: number, value: bigint, defined: bigint): void {
+    if (!this.isToggleable(id)) return;
+    const width = this.widthOf(id);
+    const mask = widthMask(width);
+    const v = value & mask;
+    const d = defined & mask;
+    this.inputState.set(id, { value: v & d, defined: d, width });
+    this.runtime.setValueAndRun(id, v, d);
     this.refreshState();
+  }
+
+  /** What this canvas last drove a pin to, or null for a pin it never has —
+   *  so a host can replay a rebuilt canvas without mirroring every callback. */
+  getInputValue(id: number): BitValue | null {
+    return this.inputState.get(id) ?? null;
+  }
+
+  /**
+   * A component's box in CSS pixels relative to the canvas element, or null.
+   *
+   * The canvas draws at its intended size but page CSS may shrink the element;
+   * this applies the same rescale the hit-test does, in reverse, so a host can
+   * anchor something over a box and have it land on the box at every size.
+   */
+  boxOf(id: number): { x: number; y: number; width: number; height: number } | null {
+    const c = this.layout.components.find((p) => p.id === id);
+    if (!c) return null;
+    const { cell, padding } = this;
+    const rect = this.canvas.getBoundingClientRect();
+    const intendedW = this.layout.width * cell + padding * 2;
+    const intendedH = this.layout.height * cell + padding * 2;
+    const sx = rect.width > 0 ? rect.width / intendedW : 1;
+    const sy = rect.height > 0 ? rect.height / intendedH : 1;
+    return {
+      x: (c.x * cell + padding) * sx,
+      y: (c.y * cell + padding) * sy,
+      width: c.width * cell * sx,
+      height: c.height * cell * sy,
+    };
+  }
+
+  private widthOf(id: number): number {
+    return this.layout.components.find((p) => p.id === id)?.bitWidth ?? 1;
+  }
+
+  /**
+   * What a pin holds NOW, from the runtime rather than from this canvas's
+   * own memory of what it drove. The runtime drives every input to Low at
+   * load and a host may drive one behind the canvas's back; the toggle, the
+   * field's seed and an edit request all have to start from the truth, or a
+   * field opens showing `?` over a badge that reads `0x0`.
+   */
+  private currentValue(id: number): BitValue {
+    return this.runtime.readValue(id);
+  }
+
+  // ---- the value field ------------------------------------------------------
+
+  /**
+   * Open a field over a bus pin, unless the host takes the gesture over.
+   *
+   * The field is one `<input>` on `document.body`, positioned `fixed` from the
+   * canvas's client rect: the canvas owns no parent and cannot position anything
+   * relative to one. It closes uncommitted on blur, Escape, scroll and resize,
+   * which is simpler and more honest than following the page around.
+   */
+  private openEditor(id: number): void {
+    this.closeEditor();
+    const box = this.boxOf(id);
+    if (!box) return;
+    const current = this.currentValue(id);
+
+    if (this.options.onPinEdit) {
+      const handled = this.options.onPinEdit({
+        id,
+        value: current,
+        box,
+        commit: (value, defined) => {
+          this.setInputValue(id, value, defined);
+          this.announce(id);
+        },
+        cancel: () => {},
+      });
+      if (handled === true) return;
+    }
+    if (typeof document === "undefined") return;
+
+    const rect = this.canvas.getBoundingClientRect();
+    const el = document.createElement("input");
+    el.type = "text";
+    el.value = formatPinValue(current, this.valueFormat);
+    el.maxLength = entryLength(current.width, this.valueFormat);
+    el.setAttribute("aria-label", `Value of pin ${id}, ${current.width} bits`);
+    el.setAttribute("aria-invalid", "false");
+    el.setAttribute("autocomplete", "off");
+    el.setAttribute("spellcheck", "false");
+    Object.assign(el.style, {
+      position: "fixed",
+      left: `${rect.left + box.x}px`,
+      top: `${rect.top + box.y}px`,
+      width: `${Math.max(box.width, this.cell * 4)}px`,
+      height: `${box.height}px`,
+      boxSizing: "border-box",
+      margin: "0",
+      padding: "0 2px",
+      font: this.theme.font ?? `${Math.round(this.cell)}px ui-monospace, monospace`,
+      textAlign: "center",
+      zIndex: "2147483647",
+    });
+
+    let done = false;
+    const finish = (commit: boolean) => {
+      if (done) return;
+      if (!commit) {
+        done = true;
+        this.closeEditor();
+        return;
+      }
+      const parsed = parsePinValue(el.value, current.width, this.valueFormat);
+      if (!parsed.ok) {
+        // Stay open. A refusal that closes the field throws away what the
+        // reader typed and makes them find the pin again to try once more.
+        el.setAttribute("aria-invalid", "true");
+        el.title = parsed.message;
+        el.focus();
+        el.select();
+        return;
+      }
+      done = true;
+      this.closeEditor();
+      this.setInputValue(id, parsed.value, parsed.defined);
+      this.announce(id);
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+      else if (el.getAttribute("aria-invalid") === "true") {
+        // Typing again is the reader answering the complaint.
+        el.setAttribute("aria-invalid", "false");
+        el.title = "";
+      }
+    };
+    // Clicking away from a value that will not parse abandons it rather than
+    // trapping focus in the field.
+    const onBlur = () => finish(false);
+    const onMove = () => finish(false);
+    el.addEventListener("keydown", onKey);
+    el.addEventListener("blur", onBlur);
+    if (typeof window !== "undefined") {
+      window.addEventListener("scroll", onMove, true);
+      window.addEventListener("resize", onMove);
+    }
+    const off = () => {
+      el.removeEventListener("keydown", onKey);
+      el.removeEventListener("blur", onBlur);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("scroll", onMove, true);
+        window.removeEventListener("resize", onMove);
+      }
+    };
+    this.editor = { id, el, off };
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+  }
+
+  private closeEditor(): void {
+    if (!this.editor) return;
+    const { el, off } = this.editor;
+    this.editor = null;
+    off();
+    el.remove();
+  }
+
+  /** Both change callbacks, for a change the reader made. */
+  private announce(id: number): void {
+    const value = this.getInputValue(id);
+    if (!value) return;
+    this.options.onPinChange?.(id, value);
+    this.options.onPinToggle?.(id, signalOf(value));
   }
 
   private isToggleable(id: number): boolean {
@@ -354,7 +588,15 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       if (comp.bitWidth <= 1) continue;
       const driver = this.realDriverByComp.get(comp.id) ?? comp.id;
       const v = this.signals.get(driver) ?? undefinedValue(comp.bitWidth);
-      const text = formatBus({ ...v, width: comp.bitWidth });
+      const value = { ...v, width: comp.bitWidth };
+      // The same spelling the value field seeds with, so what is shown can be
+      // typed back; a half-known bus shows which bits are known rather than
+      // hiding them all behind one `?`.
+      const text = formatPinValue(value, this.valueFormat);
+      if (theme.busValue) {
+        theme.busValue({ ctx, theme: theme as CircTheme<string>, cell, component: comp, value, text });
+        continue;
+      }
       const cx = (comp.x + comp.width / 2) * cell;
       const cy = comp.y * cell - cell * 0.15;
       ctx.fillText(text, cx, cy);

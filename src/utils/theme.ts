@@ -121,6 +121,20 @@ export type Skin<C extends string = ThemeColorKey> = (
   ctx: SkinContext<C>
 ) => void;
 
+/**
+ * What a theme is handed to draw one bus value badge. `text` is already
+ * formatted in the canvas's value format, so a theme that only wants to
+ * restyle can draw it as given; one that wants another spelling has `value`.
+ */
+export interface BusValueContext<C extends string = ThemeColorKey> {
+  ctx: CanvasRenderingContext2D;
+  theme: CircTheme<C>;
+  cell: number;
+  component: PlacedComponent;
+  value: BitValue;
+  text: string;
+}
+
 export interface CircTheme<C extends string = ThemeColorKey> {
   colors: Record<C, string>;
   font?: string;
@@ -138,6 +152,12 @@ export interface CircTheme<C extends string = ThemeColorKey> {
    * unfilled-circle + filled-arrow pair is drawn.
    */
   portMarker?: (args: PortMarkerContext<C>) => void;
+  /**
+   * Override how a multi-bit net's value badge is drawn above its box, or
+   * pass a no-op to draw none. If absent, the value is written centred just
+   * above the box in `busLabel`.
+   */
+  busValue?: (args: BusValueContext<C>) => void;
 }
 
 export const baseTheme: CircTheme = {

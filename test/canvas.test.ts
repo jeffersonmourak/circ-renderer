@@ -159,3 +159,361 @@ test("destroy removes every listener it attached", async () => {
   for (const set of el.listeners.values()) expect(set.size).toBe(0);
   expect(el.removed).toBe(true);
 });
+
+// ---------------------------------------------------------------------------
+// A bus pin takes a value.
+//
+// A click used to compute `inputState === 1 ? 0 : 1` and drive EVERY bit of a
+// pin to it, so an 8-bit pin could only ever be 0x00 or 0xFF. These pin the
+// new contract: a single bit still toggles on click, a bus opens a field, and
+// what is typed is what is driven.
+// ---------------------------------------------------------------------------
+
+import { isPrimitive } from "../src/layout/types";
+import { ComponentKind, widthMask } from "../src/wasm/topology";
+import type { PinEditRequest } from "../src/render/canvas";
+
+async function load(name: string) {
+  return CircRuntime.loadFromBytes(new Uint8Array(readFileSync(join(FIX, name))));
+}
+
+/** A root input pin by declared name, from the layout the canvas drew. */
+function pin(canvas: CircCanvas, name: string) {
+  const c = canvas.getLayout().components.find(
+    (p) => p.name === name && isPrimitive(p.kind) && p.kind.kind === ComponentKind.InputPin,
+  );
+  if (!c) throw new Error(`no input pin named ${name}`);
+  return c;
+}
+
+/** Client coordinates of a component's centre. The stub reports the intended
+ *  extent as its rect, so the hit-test's rescale is the identity. */
+function centre(c: { x: number; y: number; width: number; height: number }, cell = 12, padding = 4) {
+  return { clientX: (c.x + c.width / 2) * cell + padding, clientY: (c.y + c.height / 2) * cell + padding };
+}
+
+test("a width-1 pin still toggles on click", async () => {
+  const rt = await halfAdder();
+  const toggles: [number, number][] = [];
+  const changes: [number, bigint, bigint][] = [];
+  const canvas = new CircCanvas(rt, {
+    onPinToggle: (id, s) => toggles.push([id, s]),
+    onPinChange: (id, v) => changes.push([id, v.value, v.defined]),
+  });
+  const a = pin(canvas, "a");
+  expect(a.bitWidth).toBe(1);
+  const el = stub.created[0];
+
+  el.dispatchEvent("click", centre(a));
+  expect(rt.readValue(a.id)).toEqual({ value: 1n, defined: 1n, width: 1 });
+  el.dispatchEvent("click", centre(a));
+  expect(rt.readValue(a.id)).toEqual({ value: 0n, defined: 1n, width: 1 });
+
+  // Both callbacks, both times, and no field was ever created.
+  expect(toggles).toEqual([[a.id, 1], [a.id, 0]]);
+  expect(changes).toEqual([[a.id, 1n, 1n], [a.id, 0n, 1n]]);
+  expect(stub.inputs).toHaveLength(0);
+});
+
+test("a click on a bus pin opens a field and drives nothing", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const toggles: unknown[] = [];
+  const canvas = new CircCanvas(rt, { onPinToggle: (...a) => toggles.push(a) });
+  const a = pin(canvas, "pc");
+  expect(a.bitWidth).toBe(4);
+  const before = rt.readValue(a.id);
+
+  stub.created[0].dispatchEvent("click", centre(a));
+
+  // The bug this exists for: the pin is NOT all-ones now.
+  expect(rt.readValue(a.id)).toEqual(before);
+  expect(toggles).toEqual([]);
+  expect(stub.inputs).toHaveLength(1);
+  const field = stub.inputs[0];
+  expect(stub.body.children).toContain(field);
+  expect(field.focused).toBe(true);
+  expect(field.selected).toBe(true);
+  // Seeded from the RUNTIME's value: it drives every input to Low at load, so
+  // a fresh pin reads 0x0 here and in the badge, never `?` over `0x0`.
+  expect(field.value).toBe("0x0");
+  expect(field.style.position).toBe("fixed");
+});
+
+test("what is typed is what is driven, and both callbacks hear it", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const toggles: [number, number][] = [];
+  const changes: [number, bigint, bigint, number][] = [];
+  const canvas = new CircCanvas(rt, {
+    onPinToggle: (id, s) => toggles.push([id, s]),
+    onPinChange: (id, v) => changes.push([id, v.value, v.defined, v.width]),
+  });
+  const a = pin(canvas, "pc");
+  stub.created[0].dispatchEvent("click", centre(a));
+  const field = stub.inputs[0];
+
+  field.value = "a";
+  field.press("Enter");
+
+  expect(rt.readValue(a.id)).toEqual({ value: 0xan, defined: 0xfn, width: 4 });
+  expect(canvas.getInputValue(a.id)).toEqual({ value: 0xan, defined: 0xfn, width: 4 });
+  expect(changes).toEqual([[a.id, 0xan, 0xfn, 4]]);
+  // onPinToggle is lossy by construction: a mixed bus collapses to High.
+  expect(toggles).toEqual([[a.id, 1]]);
+  expect(field.removed).toBe(true);
+});
+
+test("a refused value keeps the field open and says why", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const a = pin(canvas, "pc");
+  const before = rt.readValue(a.id);
+  stub.created[0].dispatchEvent("click", centre(a));
+  const field = stub.inputs[0];
+
+  field.value = "1f"; // 31 into four bits
+  field.press("Enter");
+  expect(field.removed).toBe(false);
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  expect(field.title).toContain("15");
+  expect(rt.readValue(a.id)).toEqual(before);
+
+  // Typing again clears the complaint; a legal value then commits.
+  field.press("f");
+  expect(field.getAttribute("aria-invalid")).toBe("false");
+  field.value = "f";
+  field.press("Enter");
+  expect(rt.readValue(a.id)).toEqual({ value: 0xfn, defined: 0xfn, width: 4 });
+  expect(field.removed).toBe(true);
+});
+
+test("Escape, blur, scroll and resize each close the field uncommitted", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const a = pin(canvas, "pc");
+  const before = rt.readValue(a.id);
+  const el = stub.created[0];
+
+  const open = () => {
+    el.dispatchEvent("click", centre(a));
+    const field = stub.inputs[stub.inputs.length - 1];
+    field.value = "9";
+    return field;
+  };
+
+  let field = open();
+  field.press("Escape");
+  expect(field.removed).toBe(true);
+
+  field = open();
+  field.blur();
+  expect(field.removed).toBe(true);
+
+  field = open();
+  stub.window.dispatchEvent("scroll");
+  expect(field.removed).toBe(true);
+
+  field = open();
+  stub.window.dispatchEvent("resize");
+  expect(field.removed).toBe(true);
+
+  // Nothing above drove the pin.
+  expect(rt.readValue(a.id)).toEqual(before);
+  // …and each close took its window listeners with it.
+  for (const set of stub.window.listeners.values()) expect(set.size).toBe(0);
+});
+
+test("opening a second field closes the first", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const a = pin(canvas, "pc");
+  const el = stub.created[0];
+  el.dispatchEvent("click", centre(a));
+  el.dispatchEvent("click", centre(a));
+  expect(stub.inputs).toHaveLength(2);
+  expect(stub.inputs[0].removed).toBe(true);
+  expect(stub.inputs[1].removed).toBe(false);
+});
+
+test("setInputValue drives an exact word, masked to the width, and fires nothing", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const heard: unknown[] = [];
+  const canvas = new CircCanvas(rt, {
+    onPinToggle: (...x) => heard.push(x),
+    onPinChange: (...x) => heard.push(x),
+  });
+  const a = pin(canvas, "pc");
+
+  canvas.setInputValue(a.id, 0x1ffn, 0x1ffn);
+  expect(rt.readValue(a.id)).toEqual({ value: 0xfn, defined: 0xfn, width: 4 });
+  expect(canvas.getInputValue(a.id)).toEqual({ value: 0xfn, defined: 0xfn, width: 4 });
+
+  // A value the host asked for is not a change the host needs telling about.
+  expect(heard).toEqual([]);
+});
+
+test("a pin the canvas never drove reads as null, not as zero", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  expect(canvas.getInputValue(pin(canvas, "pc").id)).toBeNull();
+});
+
+test("? makes a driven pin unknown again, and the field seeds from the driven value", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const a = pin(canvas, "pc");
+  canvas.setInputValue(a.id, 0xan, 0xfn);
+
+  stub.created[0].dispatchEvent("click", centre(a));
+  const field = stub.inputs[0];
+  expect(field.value).toBe("0xA");
+
+  field.value = "?";
+  field.press("Enter");
+  expect(rt.readValue(a.id)).toEqual({ value: 0n, defined: 0n, width: 4 });
+});
+
+test("valueFormat chooses the base the field seeds in and bare entry is read in", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, { valueFormat: "binary" });
+  const a = pin(canvas, "pc");
+  canvas.setInputValue(a.id, 0xan, 0xfn);
+  stub.created[0].dispatchEvent("click", centre(a));
+  const field = stub.inputs[0];
+  expect(field.value).toBe("0b1010");
+
+  // A bare entry is binary here; a prefix still overrides.
+  field.value = "0011";
+  field.press("Enter");
+  expect(rt.readValue(a.id).value).toBe(3n);
+});
+
+test("setInputSignal still drives every bit, through the same path", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const a = pin(canvas, "pc");
+  canvas.setInputSignal(a.id, 1);
+  expect(rt.readValue(a.id)).toEqual({ value: 0xfn, defined: 0xfn, width: 4 });
+  canvas.setInputSignal(a.id, 0);
+  expect(rt.readValue(a.id)).toEqual({ value: 0n, defined: 0xfn, width: 4 });
+  canvas.setInputSignal(a.id, 2);
+  expect(rt.readValue(a.id)).toEqual({ value: 0n, defined: 0n, width: 4 });
+});
+
+test("a click after setInputValue flips from the value the host set", async () => {
+  // The invariant the doc comment on setInputSignal has always claimed.
+  const rt = await halfAdder();
+  const toggles: number[] = [];
+  const canvas = new CircCanvas(rt, { onPinToggle: (_, s) => toggles.push(s) });
+  const a = pin(canvas, "a");
+  canvas.setInputValue(a.id, 1n, 1n);
+  stub.created[0].dispatchEvent("click", centre(a));
+  expect(toggles).toEqual([0]);
+  expect(rt.readValue(a.id).value).toBe(0n);
+});
+
+test("onPinEdit returning true takes the gesture over; its commit drives and announces", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const requests: PinEditRequest[] = [];
+  const changes: bigint[] = [];
+  const canvas = new CircCanvas(rt, {
+    onPinEdit: (req) => { requests.push(req); return true; },
+    onPinChange: (_, v) => changes.push(v.value),
+  });
+  const a = pin(canvas, "pc");
+  stub.created[0].dispatchEvent("click", centre(a));
+
+  // No built-in field: the host said it has one.
+  expect(stub.inputs).toHaveLength(0);
+  expect(requests).toHaveLength(1);
+  const req = requests[0];
+  expect(req.id).toBe(a.id);
+  expect(req.value).toEqual({ value: 0n, defined: 0xfn, width: 4 });
+  // The box is where the host should put its field.
+  expect(req.box).toEqual(canvas.boxOf(a.id)!);
+
+  req.commit(0x5n, 0xfn);
+  expect(rt.readValue(a.id)).toEqual({ value: 0x5n, defined: 0xfn, width: 4 });
+  expect(changes).toEqual([0x5n]);
+});
+
+test("onPinEdit returning nothing lets the built-in field open", async () => {
+  const rt = await load("rom_lookup.wasm");
+  let asked = 0;
+  const canvas = new CircCanvas(rt, { onPinEdit: () => { asked += 1; } });
+  stub.created[0].dispatchEvent("click", centre(pin(canvas, "pc")));
+  expect(asked).toBe(1);
+  expect(stub.inputs).toHaveLength(1);
+});
+
+test("boxOf is the box in CSS pixels, and null for an id that has none", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, { cell: 10, padding: 6 });
+  const a = pin(canvas, "pc");
+  expect(canvas.boxOf(a.id)).toEqual({
+    x: a.x * 10 + 6,
+    y: a.y * 10 + 6,
+    width: a.width * 10,
+    height: a.height * 10,
+  });
+  expect(canvas.boxOf(999_999)).toBeNull();
+});
+
+test("boxOf follows the element when page CSS shrinks it", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const el = stub.created[0];
+  const a = pin(canvas, "pc");
+  const full = canvas.boxOf(a.id)!;
+  // Halve the rendered rect, as `max-width: 100%` on a narrow screen would.
+  const intendedW = Number.parseFloat(el.style.width);
+  const intendedH = Number.parseFloat(el.style.height);
+  el.getBoundingClientRect = () => ({ left: 0, top: 0, width: intendedW / 2, height: intendedH / 2 });
+  const half = canvas.boxOf(a.id)!;
+  expect(half.x).toBeCloseTo(full.x / 2);
+  expect(half.width).toBeCloseTo(full.width / 2);
+});
+
+test("setInputValue on a non-pin or unknown id is a no-op", async () => {
+  const rt = await halfAdder();
+  const canvas = new CircCanvas(rt, {});
+  const gate = canvas.getLayout().components.find(
+    (p) => isPrimitive(p.kind) && p.kind.kind === ComponentKind.AndGate,
+  )!;
+  canvas.setInputValue(gate.id, 1n, 1n);
+  canvas.setInputValue(999_999, 1n, 1n);
+  expect(canvas.getInputValue(gate.id)).toBeNull();
+});
+
+test("the bus badge shows the driven value in the chosen format and a theme can take it over", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const badges: string[] = [];
+  const canvas = new CircCanvas(rt, {
+    valueFormat: "decimal",
+    theme: { ...baseTheme, busValue: ({ text }) => { badges.push(text); } },
+  });
+  const a = pin(canvas, "pc");
+  badges.length = 0;
+  canvas.setInputValue(a.id, 0xan, 0xfn);
+  // Every multi-bit component is badged on each draw; the pin's own reads 10.
+  expect(badges).toContain("10");
+  // A half-known bus is written bit by bit rather than hidden behind one `?`.
+  badges.length = 0;
+  canvas.setInputValue(a.id, 0b1000n, 0b1100n);
+  expect(badges).toContain("10xx");
+});
+
+test("destroy closes an open field and removes every listener it attached", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const el = stub.created[0];
+  el.dispatchEvent("click", centre(pin(canvas, "pc")));
+  const field = stub.inputs[0];
+  expect(field.removed).toBe(false);
+
+  canvas.destroy();
+  expect(field.removed).toBe(true);
+  for (const set of stub.window.listeners.values()) expect(set.size).toBe(0);
+  for (const set of el.listeners.values()) expect(set.size).toBe(0);
+  // The canvas element itself still carries only the three it always did.
+  expect([...el.listeners.keys()].sort()).toEqual(["click", "pointerleave", "pointermove"]);
+});

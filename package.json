@@ -1,6 +1,6 @@
 {
   "name": "circ-renderer",
-  "version": "2.1.0-alpha.2",
+  "version": "2.2.0-alpha.1",
   "description": "Render and simulate compiled circ-renderer-z WASM artifacts in the browser.",
   "main": "src/index.ts",
   "module": "src/index.ts",

@@ -37,7 +37,10 @@ Multi-bit nets (buses, widths 1–64) are supported: bus wires render heavier in
 | `theme`        | `CircTheme`                         | colors + skins, see below |
 | `interactive`  | `boolean` (default true)            | enable pin clicks |
 | `layoutOptions`| `{ expandMacros?: boolean }`        | passed through to layout |
-| `onPinToggle`  | `(id, signal) => void`              | called after a click toggles an input pin; pair with `view.setInputSignal(id, signal)` to replay pins onto a rebuilt canvas |
+| `onPinChange`  | `(id, value: BitValue) => void`     | called after a reader changes an input pin — a click on a single bit, or a value typed into a bus. This is the one to mirror; replay it with `view.setInputValue(id, value, defined)` |
+| `onPinToggle`  | `(id, signal) => void`              | the older, scalar form of the same event. Still fires, but it is **lossy for a bus**: a mixed value collapses to `High`, so a host that replays what it reports will replay all-ones. Prefer `onPinChange` |
+| `onPinEdit`    | `(req) => boolean \| void`         | called when a reader clicks a pin wider than one bit. Return `true` to open your own editor; the built-in field then stays closed. `req` carries the pin's `id`, its current `value`, its `box` in CSS pixels relative to the canvas, and `commit(value, defined)` / `cancel()` |
+| `valueFormat`  | `'hex' \| 'binary' \| 'decimal'`  | the base the bus badge is written in and a bare typed value is read in. Default `hex`. `0x` and `0b` in the field override it |
 | `onHover`      | `(id \| null) => void`              | called when the pointer moves onto a different component box, and with `null` on leave; fires only on a change, so a host can drive an editor highlight straight from it |
 
 Returns `{ runtime, view, canvas, destroy() }`.
@@ -52,7 +55,28 @@ const layout  = buildLayout(runtime.topology);   // pure data, no DOM
 const view    = new CircCanvas(runtime, { cell: 14 });
 ```
 
-`CircCanvas` also exposes two host hooks:
+### Driving a bus pin
+
+A click on a pin wider than one bit opens a small text field over the pin,
+seeded with its current value. Enter drives what was typed; Escape, clicking
+away, scrolling or resizing closes it without driving anything. The field
+accepts the same spellings as the circ playground's memory grid: hex by
+default, `0x` and `0b` prefixes override, `_` groups digits, and `?` or an
+empty field means unknown. A value the pin cannot hold keeps the field open
+with the reason as its tooltip.
+
+A single-bit pin keeps its click-to-toggle exactly as before.
+
+`CircCanvas` also exposes these host hooks:
+
+- `view.setInputValue(id, value, defined)` drives an input pin to an exact
+  value, masked to its width, and redraws. `view.setInputSignal(id, signal)` is
+  the scalar form and drives every bit. Neither fires a callback.
+- `view.getInputValue(id)` returns what the canvas last drove a pin to, or
+  `null` for one it never has — enough to replay a rebuilt canvas from.
+- `view.boxOf(id)` returns a component's box in CSS pixels relative to the
+  canvas element, following any shrink page CSS applies, so a host can anchor
+  its own editor over a pin.
 
 - `view.setHighlight(id | null)` highlights one component from outside the canvas — an editor cursor, a table header — through the same `hovered` flag the pointer drives, so a skin needs no second branch. `null` clears it, and an id with no box is a no-op.
 - `view.getLayout()` returns the `LayoutGrid` the canvas drew. A host needs it to map a declared name to a box: a collapsed subcircuit carries a synthetic id that exists only in the layout, never in `runtime.topology.components`.
@@ -120,6 +144,14 @@ await renderCircuit({ url: "/static/foo.wasm", theme });
 | `label`          | text on gates                                 |
 | `labelMuted`     | reserved for secondary labels                 |
 | `macro`          | subcircuit (collapsed) box border             |
+
+### The bus value badge
+
+Every multi-bit net is labelled with its value above its box. A theme can take
+that over with `busValue({ ctx, theme, cell, component, value, text })`, where
+`text` is already spelled in the canvas's `valueFormat`; pass a no-op to draw no
+badge. A half-known bus is written bit by bit with `x` for each unknown bit
+rather than hidden behind one `?`.
 
 ### Skin functions
 

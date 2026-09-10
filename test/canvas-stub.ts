@@ -73,26 +73,161 @@ export function makeStubCanvas(): StubCanvas {
   return el;
 }
 
-/** Installs a `document` whose only job is to hand back stub canvases.
- *  Returns the uninstaller and the list of elements it created. */
-export function installStubDocument(): { created: StubCanvas[]; uninstall: () => void } {
-  const created: StubCanvas[] = [];
-  const g = globalThis as { document?: unknown };
-  const had = 'document' in g;
-  const previous = g.document;
-  g.document = {
-    createElement(tag: string) {
-      if (tag !== 'canvas') throw new Error(`canvas-stub: unexpected <${tag}>`);
-      const el = makeStubCanvas();
-      created.push(el);
-      return el;
+/**
+ * The one element the value editor creates. It records what the canvas sets
+ * on it and lets a test type into it and press keys; nothing is rendered.
+ */
+export interface StubInput {
+  tagName: 'INPUT';
+  type: string;
+  value: string;
+  title: string;
+  maxLength: number;
+  style: Record<string, string>;
+  attrs: Map<string, string>;
+  focused: boolean;
+  selected: boolean;
+  removed: boolean;
+  listeners: Map<string, Set<(e: unknown) => void>>;
+  setAttribute(name: string, value: string): void;
+  getAttribute(name: string): string | null;
+  removeAttribute(name: string): void;
+  addEventListener(type: string, fn: (e: unknown) => void): void;
+  removeEventListener(type: string, fn: (e: unknown) => void): void;
+  dispatchEvent(type: string, event?: unknown): void;
+  focus(): void;
+  select(): void;
+  blur(): void;
+  remove(): void;
+  /** Press a key as the reader would: a keydown carrying `key`. */
+  press(key: string): void;
+}
+
+export function makeStubInput(): StubInput {
+  const listeners = new Map<string, Set<(e: unknown) => void>>();
+  const attrs = new Map<string, string>();
+  const el: StubInput = {
+    tagName: 'INPUT',
+    type: 'text',
+    value: '',
+    title: '',
+    maxLength: -1,
+    style: {},
+    attrs,
+    focused: false,
+    selected: false,
+    removed: false,
+    listeners,
+    setAttribute: (n, v) => { attrs.set(n, v); },
+    getAttribute: (n) => attrs.get(n) ?? null,
+    removeAttribute: (n) => { attrs.delete(n); },
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(fn);
+    },
+    removeEventListener(type, fn) {
+      listeners.get(type)?.delete(fn);
+    },
+    dispatchEvent(type, event = {}) {
+      for (const fn of listeners.get(type) ?? []) fn(event);
+    },
+    focus() { el.focused = true; },
+    select() { el.selected = true; },
+    blur() {
+      el.focused = false;
+      el.dispatchEvent('blur', {});
+    },
+    remove() { el.removed = true; },
+    press(key) {
+      let prevented = false;
+      el.dispatchEvent('keydown', { key, preventDefault: () => { prevented = true; }, stopPropagation: () => {} });
+      void prevented;
     },
   };
+  return el;
+}
+
+export interface StubWindow {
+  listeners: Map<string, Set<(e: unknown) => void>>;
+  addEventListener(type: string, fn: (e: unknown) => void, opts?: unknown): void;
+  removeEventListener(type: string, fn: (e: unknown) => void, opts?: unknown): void;
+  dispatchEvent(type: string, event?: unknown): void;
+}
+
+/**
+ * Installs a `document` that hands back stub canvases and stub inputs, holds
+ * a `body` that records what is appended, and a `window` that records the
+ * listeners the value editor attaches. Returns the uninstaller and everything
+ * it created.
+ */
+export function installStubDocument(): {
+  created: StubCanvas[];
+  inputs: StubInput[];
+  body: { children: unknown[] };
+  window: StubWindow;
+  uninstall: () => void;
+} {
+  const created: StubCanvas[] = [];
+  const inputs: StubInput[] = [];
+  const body = { children: [] as unknown[] };
+  const g = globalThis as { document?: unknown; window?: unknown };
+  const hadDocument = 'document' in g;
+  const previousDocument = g.document;
+  const hadWindow = 'window' in g;
+  const previousWindow = g.window;
+
+  const windowListeners = new Map<string, Set<(e: unknown) => void>>();
+  const window: StubWindow = {
+    listeners: windowListeners,
+    addEventListener(type, fn) {
+      if (!windowListeners.has(type)) windowListeners.set(type, new Set());
+      windowListeners.get(type)!.add(fn);
+    },
+    removeEventListener(type, fn) {
+      windowListeners.get(type)?.delete(fn);
+    },
+    dispatchEvent(type, event = {}) {
+      for (const fn of windowListeners.get(type) ?? []) fn(event);
+    },
+  };
+
+  const document = {
+    activeElement: null as unknown,
+    body: {
+      appendChild(el: unknown) {
+        body.children.push(el);
+        return el;
+      },
+    },
+    createElement(tag: string) {
+      if (tag === 'canvas') {
+        const el = makeStubCanvas();
+        created.push(el);
+        return el;
+      }
+      if (tag === 'input') {
+        const el = makeStubInput();
+        const focus = el.focus;
+        // Focusing makes it the active element, the way a document would.
+        el.focus = () => { focus(); document.activeElement = el; };
+        inputs.push(el);
+        return el;
+      }
+      throw new Error(`canvas-stub: unexpected <${tag}>`);
+    },
+  };
+  g.document = document;
+  g.window = window;
   return {
     created,
+    inputs,
+    body,
+    window,
     uninstall() {
-      if (had) g.document = previous;
+      if (hadDocument) g.document = previousDocument;
       else delete g.document;
+      if (hadWindow) g.window = previousWindow;
+      else delete g.window;
     },
   };
 }

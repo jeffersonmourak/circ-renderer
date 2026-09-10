@@ -36,7 +36,16 @@ export type {
 } from "./layout";
 
 export { CircCanvas } from "./render/canvas";
-export type { RenderOptions } from "./render/canvas";
+export type { RenderOptions, PinEditRequest } from "./render/canvas";
+
+export {
+  parsePinValue,
+  formatPinValue,
+  entryLength,
+  UNKNOWN,
+  type ValueFormat,
+  type ParsedPinValue,
+} from "./render/pin-value";
 
 export {
   baseTheme,
@@ -51,6 +60,7 @@ export {
   type WireDrawContext,
   type BackgroundContext,
   type PortMarkerContext,
+  type BusValueContext,
   type SignalStyle,
   type WireStyle,
 } from "./utils/theme";
