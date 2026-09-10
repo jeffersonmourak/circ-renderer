@@ -17,8 +17,8 @@ export type { LoadOptions, RuntimeExports, MemInfo, Memory, MemStatus } from "./
 export {
   buildLayout,
   collapse,
-  assignColumns,
-  assignRows,
+  layer,
+  order,
   place,
   route,
 } from "./layout";

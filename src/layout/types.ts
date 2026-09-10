@@ -119,6 +119,125 @@ export interface LayoutOptions {
   expandMacros?: boolean;
 }
 
+// ---------- Layered graph (mirrors lib/preview/layout/types.zig) ----------
+
+/** A node of the layered graph: a real `VirtualGraph` node or a dummy that
+ * carries a long edge through an intermediate layer. */
+export interface LayerNode {
+  /** Index into `VirtualGraph.nodes` for a real node; null for a dummy. */
+  real: number | null;
+  layer: number;
+  /** For a dummy: index into `LayeredGraph.originals` of the edge it carries. */
+  carries: number | null;
+}
+
+/** One wire as collapse produced it, in node order then each node's `outputs` order. */
+export interface OriginalEdge {
+  src: number; // VirtualGraph node index
+  srcPort: number;
+  dst: number;
+  dstPort: number;
+  /** Closes a cycle (or runs leftward after sink forcing): routed as a return lane. */
+  back: boolean;
+  /** See `OutputEdge.realSrcId`. */
+  realSrcId: number;
+}
+
+/** A layer-adjacent segment: `src` in layer `L`, `dst` in `L + 1`. */
+export interface LayerEdge {
+  src: number; // LayerNode index
+  dst: number;
+  srcPort: number;
+  dstPort: number;
+  original: number;
+}
+
+export interface LayeredGraph {
+  /** Real nodes first in `VirtualGraph` order, then dummies in `originals` order. */
+  nodes: LayerNode[];
+  edges: LayerEdge[];
+  originals: OriginalEdge[];
+  numLayers: number;
+}
+
+export interface Ordering {
+  /** Per layer, `LayerNode` indices top to bottom. */
+  order: number[][];
+  /** Position of every `LayerNode` inside its layer. */
+  pos: number[];
+  rounds: number;
+}
+
+// ---------- Coordinates ----------
+
+export interface ChannelWidths {
+  /** Width of the gap after layer `k`. */
+  after: number[];
+}
+
+export interface Coords {
+  x: number[];
+  y: number[];
+  w: number[];
+  h: number[];
+  layerX: number[];
+  layerW: number[];
+  channelX: number[];
+  width: number;
+  height: number;
+}
+
+// ---------- Channels ----------
+
+export type Rail = "left" | "right" | "none";
+
+export interface Terminal {
+  node: number;
+  port: number;
+  row: number;
+  rail: Rail;
+}
+
+export interface Piece {
+  track: number;
+  lo: number;
+  hi: number;
+}
+
+export interface Jog {
+  row: number;
+  fromTrack: number;
+  toTrack: number;
+}
+
+export interface Net {
+  srcReal: number;
+  srcPort: number;
+  src: Terminal;
+  sinks: Terminal[];
+  lo: number;
+  hi: number;
+  straight: boolean;
+  pieces: Piece[];
+  jogs: Jog[];
+  back: boolean;
+  fallback: boolean;
+}
+
+export interface Gap {
+  afterLayer: number;
+  nets: Net[];
+  tracks: number;
+  width: number;
+}
+
+export interface RoutePlan {
+  gaps: Gap[];
+  returnRows: number;
+  spacerRows: number[];
+  fallbacks: number;
+}
+
 export const isPrimitive = (k: NodeKind): k is { tag: "primitive"; kind: ComponentKind } =>
   k.tag === "primitive";
 
