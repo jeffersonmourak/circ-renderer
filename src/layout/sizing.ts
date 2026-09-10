@@ -57,13 +57,30 @@ export function concatSize(operandCount: number): PrimitiveSize {
   return { width: 5, height: n <= 1 ? 3 : 2 * n + 1 };
 }
 
+/** `[N]` for widths > 1, empty for scalar pins — mirrors `sizing.zig`. */
+export function widthAnnotationLen(bitWidth: number): number {
+  if (bitWidth <= 1) return 0;
+  return 2 + String(bitWidth).length;
+}
+
 /**
- * Pin (input or output) box. Width grows with the label name to keep it
- * centered with one cell of padding each side; floor at 5 so short names
- * still look box-shaped.
+ * Pin (input or output) box. Width grows with the label name (and the
+ * `[N]` annotation of a multi-bit pin) to keep it centered with one cell of
+ * padding each side; floor at 5 so short names still look box-shaped.
  */
-export function pinSize(nameLen: number): PrimitiveSize {
-  return { width: Math.max(5, nameLen + 4), height: 3 };
+export function pinSize(nameLen: number, bitWidth: number = 1): PrimitiveSize {
+  return { width: Math.max(5, nameLen + widthAnnotationLen(bitWidth) + 4), height: 3 };
+}
+
+/**
+ * LED box. Width 1 keeps the 5×3 box; a wider LED needs room for its
+ * `0x?…` display label (one `?` per nibble) — the compiler's `ledSize` with
+ * `expand_display` off, which is the only mode the canvas draws.
+ */
+export function ledSize(bitWidth: number): PrimitiveSize {
+  if (bitWidth <= 1) return primitiveSizing[ComponentKind.Led];
+  const labelLen = 2 + Math.floor((bitWidth + 3) / 4);
+  return { width: Math.max(5, labelLen + 4), height: 3 };
 }
 
 /**

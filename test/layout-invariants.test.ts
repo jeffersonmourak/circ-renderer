@@ -18,9 +18,8 @@
  * must reproduce the compiler's own rows (`test/fixtures/layouts/
  * invariants.txt`, copied from `tests/fixtures/preview/layout-invariants.golden`)
  * — the two implementations agree on the definition. Second, the checker
- * over this port's `buildLayout` is pinned per fixture-mode in `TS_TODAY`:
- * the old algorithm's numbers on this side, replaced by all-zero rows when
- * the rewrite lands here.
+ * over this port's `buildLayout` must give the same row: identical layouts
+ * have identical invariants, all zero on this corpus.
  */
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -128,18 +127,33 @@ export function invariantReport(grid: GridLike): Report {
     }
   }
 
+  // Fold one net's claims first: a fan-out's wires all cover the trunk, and
+  // that is one net passing through — unless one of them corners there.
   for (const list of claims.values()) {
-    const distinct = new Set(list.map((c) => c.net));
-    if (distinct.size < 2) continue;
-    if (list.every((c) => c.horizontal === list[0].horizontal)) {
+    const folded = new Map<string, { horizontal: boolean; vertical: boolean; corner: boolean }>();
+    for (const c of list) {
+      const f = folded.get(c.net) ?? { horizontal: false, vertical: false, corner: false };
+      if (c.horizontal) f.horizontal = true;
+      else f.vertical = true;
+      if (!c.through) f.corner = true;
+      folded.set(c.net, f);
+    }
+    if (folded.size < 2) continue;
+    const fs = Array.from(folded.values());
+    const allH = fs.every((f) => f.horizontal && !f.vertical);
+    const allV = fs.every((f) => f.vertical && !f.horizontal);
+    if (allH || allV) {
       report.shared++;
       continue;
     }
-    if (distinct.size === 2 && list.length === 2 && list[0].through && list[1].through && list[0].horizontal !== list[1].horizontal) {
-      report.crossings++;
-    } else {
-      report.junction++;
-    }
+    const [a, b] = fs;
+    const clean =
+      fs.length === 2 &&
+      !a.corner &&
+      !b.corner &&
+      ((a.horizontal && !a.vertical && b.vertical && !b.horizontal) || (b.horizontal && !b.vertical && a.vertical && !a.horizontal));
+    if (clean) report.crossings++;
+    else report.junction++;
   }
 
   for (const net of nets.values()) {
@@ -176,13 +190,18 @@ export function formatRow(name: string, mode: Mode, grid: GridLike): string {
   return `${name} ${mode} I0=${r.body} I1=${r.shared} I2=${r.junction} I3=${r.tree} X=${r.crossings} B=${r.bends} S=${r.straight}/${r.wires} size=${grid.width}x${grid.height}`;
 }
 
+/** The compiler's row without the columns this checker cannot compute —
+ * `C=` (ordering crossings) and `F=` (fallback nets) come from its stages,
+ * not from the grid. */
+const stripStageColumns = (row: string): string => row.replace(/ C=\d+/, "").replace(/ F=\d+/, "");
+
 const ZIG_ROWS = new Map(
   readFileSync(join(import.meta.dir, "fixtures", "layouts", "invariants.txt"), "utf8")
     .split("\n")
     .filter((l) => l.length > 0)
     .map((l) => {
       const [name, mode] = l.split(" ");
-      return [`${name} ${mode}`, l];
+      return [`${name} ${mode}`, stripStageColumns(l)];
     })
 );
 
@@ -197,46 +216,10 @@ for (const [name, mode] of vendoredFixtureModes()) {
   });
 }
 
-/**
- * This port's own numbers, old algorithm, pinned. Regenerate by running the
- * file with `PRINT_TS_ROWS=1` and pasting the output.
- */
-export const TS_TODAY: Record<string, string> = {
-  "and_of_not opaque": "and_of_not opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=3/4 size=37x7",
-  "builtin_xnor expanded": "builtin_xnor expanded I0=0 I1=0 I2=0 I3=0 X=1 B=8 S=8/12 size=67x13",
-  "builtin_xnor opaque": "builtin_xnor opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 size=32x7",
-  "builtin_xor expanded": "builtin_xor expanded I0=0 I1=0 I2=0 I3=0 X=1 B=8 S=7/11 size=57x13",
-  "builtin_xor opaque": "builtin_xor opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 size=31x7",
-  "chain opaque": "chain opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=4/4 size=47x3",
-  "clean_gated_feedback opaque": "clean_gated_feedback opaque I0=0 I1=0 I2=0 I3=0 X=0 B=4 S=1/2 size=23x4",
-  "demux_1to2 opaque": "demux_1to2 opaque I0=0 I1=0 I2=1 I3=0 X=1 B=6 S=4/7 size=41x13",
-  "demux_2bit_1to2 opaque": "demux_2bit_1to2 opaque I0=0 I1=0 I2=1 I3=0 X=2 B=14 S=6/13 size=42x19",
-  "demux_3bit_1to2 opaque": "demux_3bit_1to2 opaque I0=5 I1=0 I2=3 I3=0 X=6 B=24 S=8/19 size=42x31",
-  "edge_single_component opaque": "edge_single_component opaque I0=0 I1=0 I2=0 I3=0 X=0 B=4 S=1/2 size=24x7",
-  "fan_in opaque": "fan_in opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 size=25x7",
-  "fan_out opaque": "fan_out opaque I0=0 I1=0 I2=0 I3=0 X=0 B=4 S=4/6 size=26x11",
-  "full_adder_from_builtins expanded": "full_adder_from_builtins expanded I0=0 I1=0 I2=4 I3=0 X=8 B=34 S=15/31 size=100x39",
-  "full_adder_from_builtins opaque": "full_adder_from_builtins opaque I0=0 I1=0 I2=0 I3=0 X=2 B=17 S=5/12 size=64x18",
-  "led_4bit_default opaque": "led_4bit_default opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=1/1 size=15x3",
-  "mixed_width_preview opaque": "mixed_width_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=3/3 size=42x7",
-  "multi_led opaque": "multi_led opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=3/3 size=16x11",
-  "multibit_and_preview opaque": "multibit_and_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 size=30x7",
-  "multibit_input_preview opaque": "multibit_input_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=2/2 size=27x3",
-  "multibit_output_preview opaque": "multibit_output_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=2/2 size=25x3",
-  "parallel_leftward_detours opaque": "parallel_leftward_detours opaque I0=0 I1=0 I2=0 I3=0 X=0 B=8 S=2/4 size=24x8",
-  "ram_basic opaque": "ram_basic opaque I0=0 I1=0 I2=1 I3=0 X=0 B=6 S=2/5 size=39x15",
-  "ram_write_read opaque": "ram_write_read opaque I0=0 I1=0 I2=1 I3=0 X=0 B=6 S=2/5 size=39x15",
-  "regression_led_out_drives_gate opaque": "regression_led_out_drives_gate opaque I0=5 I1=0 I2=0 I3=0 X=0 B=4 S=2/4 size=33x7",
-  "rom_basic opaque": "rom_basic opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=2/2 size=40x3",
-  "rom_lookup opaque": "rom_lookup opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=2/2 size=40x3",
-  "single_gate opaque": "single_gate opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=2/2 size=27x3",
-};
-
 for (const [name, mode] of vendoredFixtureModes()) {
-  test(`${name} (${mode}): this port's invariants are pinned`, async () => {
+  test(`${name} (${mode}): this port's layout has the compiler's invariants`, async () => {
     const rt = await load(name);
     const row = formatRow(name, mode, buildLayout(rt.topology, { expandMacros: mode === "expanded" }));
-    if (process.env.PRINT_TS_ROWS) console.log(`  "${name} ${mode}": "${row}",`);
-    expect(row).toBe(TS_TODAY[`${name} ${mode}`] ?? "<unpinned>");
+    expect(row).toBe(ZIG_ROWS.get(`${name} ${mode}`) ?? "<no compiler row>");
   });
 }

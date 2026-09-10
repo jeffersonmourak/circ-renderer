@@ -19,7 +19,8 @@ export {
   collapse,
   layer,
   order,
-  route,
+  plan,
+  emit,
 } from "./layout";
 export type {
   LayoutGrid,

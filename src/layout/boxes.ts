@@ -1,6 +1,6 @@
 import { ComponentKind, PortName } from "../wasm/topology";
 import { inputSlots, outputRow } from "./ports";
-import { concatSize, macroSize, memoryLabel, memorySize, pinSize, primitiveSizing, type PrimitiveSize, sliceSize } from "./sizing";
+import { concatSize, ledSize, macroSize, memoryLabel, memorySize, pinSize, primitiveSizing, type PrimitiveSize, sliceSize } from "./sizing";
 import { isPrimitive, type PortCoord, type PortSlot, type VirtualNode } from "./types";
 
 /**
@@ -26,7 +26,10 @@ export function sizeOf(node: VirtualNode): PrimitiveSize {
   if (isPrimitive(node.kind)) {
     const k = node.kind.kind;
     if (k === ComponentKind.InputPin || k === ComponentKind.OutputPin) {
-      return pinSize(node.name.length);
+      return pinSize(node.name.length, node.bitWidth);
+    }
+    if (k === ComponentKind.Led) {
+      return ledSize(node.bitWidth);
     }
     if (k === ComponentKind.Slice) {
       const { lo, hi } = node.slice ?? { lo: 0, hi: 1 };
