@@ -180,6 +180,48 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   }
   private get valueFormat(): ValueFormat { return this.options.valueFormat ?? "hex"; }
 
+  // ---- changing the look of a live canvas -----------------------------------
+  //
+  // Every option below used to be captured at construction, so a host that
+  // wanted a different theme had to destroy the canvas and build another — and
+  // contents are runtime state of ONE instance, so the reader's toggled pins,
+  // typed bus values and loaded memory images went with it. The drawing already
+  // reads each option through a getter; these swap the option and redraw.
+
+  /** Swap the theme in place and redraw. Nothing else changes: the runtime,
+   *  its pins and its memories are untouched. */
+  setTheme(theme: CircTheme<C>): void {
+    this.options = { ...this.options, theme };
+    this.draw();
+  }
+
+  /** Change the pixel size of a layout cell. The element resizes to match. */
+  setCell(cell: number): void {
+    this.options = { ...this.options, cell };
+    this.resize();
+    this.draw();
+  }
+
+  /** Change the padding around the grid. The element resizes to match. */
+  setPadding(padding: number): void {
+    this.options = { ...this.options, padding };
+    this.resize();
+    this.draw();
+  }
+
+  /** Change the base the bus badges are written in and a bare typed value is
+   *  read in. An open value field keeps the base it opened with. */
+  setValueFormat(format: ValueFormat): void {
+    this.options = { ...this.options, valueFormat: format };
+    this.draw();
+  }
+
+  /** Repaint from the current state, for a host that changed something the
+   *  canvas cannot see — a sprite sheet finishing its load, say. */
+  redraw(): void {
+    this.draw();
+  }
+
   /** Resize canvas to match the grid extents at the current cell size. */
   resize(): void {
     const cell = this.cell;

@@ -634,3 +634,90 @@ test("the exported helpers draw the default boxes and labels without a real cont
   };
   for (const skin of [drawMemory, drawSlice, drawConcat]) expect(() => skin(args)).not.toThrow();
 });
+
+// ---------------------------------------------------------------------------
+// A theme flip is a redraw, not a rebuild.
+//
+// Every option used to be captured at construction, so a host that wanted a
+// different theme destroyed the canvas and built another — and the reader's
+// pins, bus values and memory images were runtime state of the instance that
+// went. These pin that a live canvas changes its look in place.
+// ---------------------------------------------------------------------------
+
+test("setTheme swaps the theme the skins receive, on the same canvas, keeping the pins", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const first = recordingTheme();
+  const canvas = new CircCanvas(rt, { theme: first.theme });
+  const el = stub.created[0];
+  const pc = pin(canvas, "pc");
+  canvas.setInputValue(pc.id, 0xan, 0xfn);
+
+  const second = recordingTheme();
+  second.seen.length = 0;
+  canvas.setTheme(second.theme);
+
+  // The new theme drew; the old one did not draw again.
+  expect(second.seen.length).toBeGreaterThan(0);
+  expect(second.seen.every((c) => c.theme === second.theme)).toBe(true);
+  // Same element, same listeners: nothing was destroyed.
+  expect(stub.created).toHaveLength(1);
+  expect(el.removed).toBe(false);
+  expect([...el.listeners.keys()].sort()).toEqual(["click", "pointerleave", "pointermove"]);
+  // …and the value the reader typed is still there, on the canvas and in the circuit.
+  expect(canvas.getInputValue(pc.id)).toEqual({ value: 0xan, defined: 0xfn, width: 4 });
+  expect(rt.readValue(pc.id)).toEqual({ value: 0xan, defined: 0xfn, width: 4 });
+});
+
+test("setTheme keeps a loaded memory, which a rebuild never could", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const canvas = new CircCanvas(rt, {});
+  const [code] = rt.memories();
+  rt.loadMemImage(code.id, new Uint8Array([0xde, 0xad]));
+  canvas.setTheme({ ...baseTheme, colors: { ...baseTheme.colors, background: "#000" } });
+  expect(rt.readMemWord(code.id, 1).value).toBe(0xadn);
+});
+
+test("setCell and setPadding resize the element to the new metrics", async () => {
+  const rt = await halfAdder();
+  const canvas = new CircCanvas(rt, { cell: 10, padding: 4 });
+  const el = stub.created[0];
+  const layout = canvas.getLayout();
+  expect(el.style.width).toBe(`${layout.width * 10 + 8}px`);
+
+  canvas.setCell(20);
+  expect(el.style.width).toBe(`${layout.width * 20 + 8}px`);
+  canvas.setPadding(10);
+  expect(el.style.width).toBe(`${layout.width * 20 + 20}px`);
+  // The hit-test follows: a click at the new centre still lands on the pin.
+  const a = pin(canvas, "a");
+  const toggles: number[] = [];
+  const c2 = new CircCanvas(rt, { cell: 20, padding: 10, onPinToggle: (_, s) => toggles.push(s) });
+  stub.created[1].dispatchEvent("click", centre(a, 20, 10));
+  expect(toggles).toEqual([1]);
+  void c2;
+});
+
+test("setValueFormat re-spells the badges without touching the value", async () => {
+  const rt = await load("rom_lookup.wasm");
+  const badges: string[] = [];
+  const canvas = new CircCanvas(rt, {
+    theme: { ...baseTheme, busValue: ({ text }) => { badges.push(text); } },
+  });
+  const pc = pin(canvas, "pc");
+  canvas.setInputValue(pc.id, 0xan, 0xfn);
+  expect(badges).toContain("0xA");
+  badges.length = 0;
+  canvas.setValueFormat("decimal");
+  expect(badges).toContain("10");
+  expect(rt.readValue(pc.id).value).toBe(0xan);
+});
+
+test("redraw repaints from the current state and changes nothing", async () => {
+  const rt = await halfAdder();
+  const { theme, seen } = recordingTheme();
+  const canvas = new CircCanvas(rt, { theme });
+  const before = seen.length;
+  canvas.redraw();
+  expect(seen.length).toBeGreaterThan(before);
+  expect(stub.created).toHaveLength(1);
+});

@@ -81,6 +81,16 @@ A single-bit pin keeps its click-to-toggle exactly as before.
 - `view.setHighlight(id | null)` highlights one component from outside the canvas — an editor cursor, a table header — through the same `hovered` flag the pointer drives, so a skin needs no second branch. `null` clears it, and an id with no box is a no-op.
 - `view.getLayout()` returns the `LayoutGrid` the canvas drew. A host needs it to map a declared name to a box: a collapsed subcircuit carries a synthetic id that exists only in the layout, never in `runtime.topology.components`.
 
+### Changing the look of a live canvas
+
+`view.setTheme(theme)`, `view.setCell(px)`, `view.setPadding(px)` and
+`view.setValueFormat(base)` change a canvas in place and redraw it. Nothing
+else changes: the runtime, its pins, its typed bus values and its loaded
+memories are untouched. Before these, a host that wanted a different theme
+had to destroy the canvas and build another, and every one of those was lost
+with the old instance. `view.redraw()` repaints from the current state, for
+something the canvas cannot see change — a sprite sheet finishing its load.
+
 ### Memories
 
 A `rom` or `ram` carries its shape in the artifact and none of its contents;
