@@ -1,7 +1,7 @@
 import type { FullTopology } from "../wasm/topology";
 import { emit, plan, widths } from "./channels";
 import { collapse } from "./collapse";
-import { assign, relayoutColumns, stubWidths, toPlaced } from "./coords";
+import { ROW_GUTTER, assign, relayoutColumns, stubWidths, toPlaced } from "./coords";
 import { layer } from "./layering";
 import { order } from "./ordering";
 import type { LayoutGrid, LayoutOptions } from "./types";
@@ -24,7 +24,7 @@ export function buildLayout(
   const graph = collapse(topology, opts);
   const layered = layer(graph);
   const ordering = order(graph, layered);
-  const coords = assign(graph, layered, ordering, stubWidths(layered.numLayers));
+  const coords = assign(graph, layered, ordering, stubWidths(layered.numLayers), opts.rowGutter ?? ROW_GUTTER);
   const routePlan = plan(graph, layered, coords);
   relayoutColumns(coords, layered, widths(routePlan, layered.numLayers));
   const placed = toPlaced(graph, layered, coords);

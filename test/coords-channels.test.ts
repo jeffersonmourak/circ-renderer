@@ -104,3 +104,32 @@ test("channels: a back edge gets two tracks and a return row below the diagram",
   expect(lane.segments[4].to.x).toBeGreaterThan(lane.segments[4].from.x);
   expect(r.height).toBe(heightBefore + 1);
 });
+
+test("coords: the row gutter is the caller's, and stacked boxes keep it", () => {
+  // Two input pins into one AND: nothing prefers a row for a pin, so the
+  // second is packed under the first at exactly box height plus the gutter.
+  const nodes = () => [
+    mk(0, prim(ComponentKind.InputPin), [], [{ dstId: 2, srcPort: SRC_OUT, dstPort: DST_A }]),
+    mk(1, prim(ComponentKind.InputPin), [], [{ dstId: 2, srcPort: SRC_OUT, dstPort: DST_B }]),
+    mk(2, prim(ComponentKind.AndGate), [
+      { srcId: 0, srcPort: SRC_OUT, dstPort: DST_A },
+      { srcId: 1, srcPort: SRC_OUT, dstPort: DST_B },
+    ], [{ dstId: 3, srcPort: SRC_OUT, dstPort: DST_IN }]),
+    mk(3, prim(ComponentKind.OutputPin), [{ srcId: 2, srcPort: SRC_OUT, dstPort: DST_IN }], []),
+  ];
+  for (const gutter of [1, 2, 3]) {
+    const graph: VirtualGraph = { nodes: nodes(), nextId: 4 };
+    const layered = layer(graph);
+    const ordering = order(graph, layered);
+    const coords = assign(graph, layered, ordering, stubWidths(layered.numLayers), gutter);
+    const at = (id: number) => layered.nodes.findIndex((n) => n.real === id);
+    expect(coords.y[at(1)] - coords.y[at(0)]).toBe(coords.h[at(0)] + gutter);
+  }
+  // The default is the compiler's.
+  const graph: VirtualGraph = { nodes: nodes(), nextId: 4 };
+  const layered = layer(graph);
+  const ordering = order(graph, layered);
+  const dflt = assign(graph, layered, ordering, stubWidths(layered.numLayers));
+  const at = (id: number) => layered.nodes.findIndex((n) => n.real === id);
+  expect(dflt.y[at(1)] - dflt.y[at(0)]).toBe(dflt.h[at(0)] + 1);
+});

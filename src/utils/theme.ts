@@ -3,7 +3,6 @@ import type { PlacedComponent, RoutedWire } from "../layout/types";
 
 export type ThemeColorKey =
   | "background"
-  | "grid"
   | "stroke"
   | "fillIdle"
   | "fillActive"
@@ -20,7 +19,6 @@ export type ThemeColorKey =
 
 export const defaultColors: Record<ThemeColorKey, string> = {
   background: "#f8f9fa",
-  grid: "#e9ecef",
   stroke: "#212529",
   fillIdle: "#ffffff",
   fillActive: "#28a745",

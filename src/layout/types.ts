@@ -117,6 +117,12 @@ export interface LayoutGrid {
 
 export interface LayoutOptions {
   expandMacros?: boolean;
+  /**
+   * Free rows between stacked boxes. Default 1, which is what the compiler's
+   * `--preview` uses and what the parity goldens are pinned at; a host whose
+   * theme draws above a box (a value chip over a pin) asks for 2.
+   */
+  rowGutter?: number;
 }
 
 // ---------- Layered graph (mirrors lib/preview/layout/types.zig) ----------

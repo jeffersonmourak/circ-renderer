@@ -75,3 +75,17 @@ test("lays out a ram box and routes all four inputs onto ports", async () => {
     expect(slot).toBeDefined();
   }
 });
+
+test("layoutOptions.rowGutter spaces stacked boxes, and the default is one row", async () => {
+  const rt = await load("half_adder.wasm");
+  const pinsOf = (rowGutter?: number) =>
+    buildLayout(rt.topology, rowGutter === undefined ? {} : { rowGutter })
+      .components.filter((c) => isPrimitive(c.kind) && c.kind.kind === ComponentKind.InputPin)
+      .sort((p, q) => p.y - q.y);
+  const dflt = pinsOf();
+  expect(dflt.length).toBe(2);
+  expect(dflt[1].y - dflt[0].y).toBe(dflt[0].height + 1);
+  const wide = pinsOf(2);
+  expect(wide[1].y - wide[0].y).toBe(wide[0].height + 2);
+  expect(pinsOf(1)).toEqual(dflt);
+});

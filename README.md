@@ -36,7 +36,7 @@ Multi-bit nets (buses, widths 1–64) are supported: bus wires render heavier in
 | `padding`      | `number` (default 4)                | pixels around the canvas grid |
 | `theme`        | `CircTheme`                         | colors + skins, see below |
 | `interactive`  | `boolean` (default true)            | enable pin clicks |
-| `layoutOptions`| `{ expandMacros?: boolean }`        | passed through to layout |
+| `layoutOptions`| `{ expandMacros?, rowGutter? }`     | passed through to layout; `rowGutter` (default 1) is the free rows between stacked boxes, for a theme that draws above a box |
 | `onPinChange`  | `(id, value: BitValue) => void`     | called after a reader changes an input pin — a click on a single bit, or a value typed into a bus. This is the one to mirror; replay it with `view.setInputValue(id, value, defined)` |
 | `onPinToggle`  | `(id, signal) => void`              | the older, scalar form of the same event. Still fires, but it is **lossy for a bus**: a mixed value collapses to `High`, so a host that replays what it reports will replay all-ones. Prefer `onPinChange` |
 | `onPinEdit`    | `(req) => boolean \| void`         | called when a reader clicks a pin wider than one bit. Return `true` to open your own editor; the built-in field then stays closed. `req` carries the pin's `id`, its current `value`, its `box` in CSS pixels relative to the canvas, and `commit(value, defined)` / `cancel()` |
@@ -156,7 +156,6 @@ const theme: CircTheme<ThemeColorKey> = {
     label:      "#e2e8f0",
     labelMuted: "#64748b",
     macro:      "#a78bfa",
-    grid:       "#1e293b",
   },
   font: '600 10px "JetBrains Mono", ui-monospace, monospace',
   // override a single component skin
@@ -175,7 +174,6 @@ await renderCircuit({ url: "/static/foo.wasm", theme });
 | key              | used for                                       |
 |------------------|-----------------------------------------------|
 | `background`     | canvas fill                                   |
-| `grid`           | reserved for future grid backgrounds           |
 | `stroke`         | gate borders                                  |
 | `fillIdle`       | gate body when its output is `0`              |
 | `fillActive`     | gate body / LED ring when output is `1`       |

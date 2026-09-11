@@ -75,7 +75,12 @@ function preferredRow(graph: VirtualGraph, layered: LayeredGraph, ins: number[][
   return outputPortRow(graph, layered, y, h, layered.edges[edges[0]].src);
 }
 
-export function assign(graph: VirtualGraph, layered: LayeredGraph, ordering: Ordering, widths: ChannelWidths): Coords {
+/**
+ * `rowGutter` is the free rows a box leaves below itself; `ROW_GUTTER` unless
+ * a host asks for more (a theme whose marks reach above a box needs the room).
+ * The compiler's preview always uses the default.
+ */
+export function assign(graph: VirtualGraph, layered: LayeredGraph, ordering: Ordering, widths: ChannelWidths, rowGutter: number = ROW_GUTTER): Coords {
   const n = layered.nodes.length;
   const numLayers = layered.numLayers;
 
@@ -107,7 +112,7 @@ export function assign(graph: VirtualGraph, layered: LayeredGraph, ordering: Ord
       const top = preferred !== null ? Math.max(cursor, preferred) : cursor;
       y[ni] = top;
       anyCursor = top + h[ni];
-      boxCursor = isBox ? top + h[ni] + ROW_GUTTER : top + h[ni];
+      boxCursor = isBox ? top + h[ni] + rowGutter : top + h[ni];
     }
   }
 
@@ -132,7 +137,7 @@ export function assign(graph: VirtualGraph, layered: LayeredGraph, ordering: Ord
         let room = true;
         if (i + 1 < lo.length) {
           const next = lo[i + 1];
-          const gap = layered.nodes[ni].real !== null && layered.nodes[next].real !== null ? ROW_GUTTER : 0;
+          const gap = layered.nodes[ni].real !== null && layered.nodes[next].real !== null ? rowGutter : 0;
           room = target + h[ni] + gap <= y[next];
         }
         if (room) y[ni] = target;
