@@ -62,6 +62,7 @@ export {
   type WireDrawContext,
   type BackgroundContext,
   type PortMarkerContext,
+  type FanOutMarkerContext,
   type BusValueContext,
   type HighlightContext,
   type SignalStyle,

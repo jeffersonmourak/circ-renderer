@@ -872,8 +872,19 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       for (const [key, n] of counts) {
         if (n < 3) continue;
         const [xs, ys] = key.split(",");
-        const x = Number(xs) * cell + cell / 2;
-        const y = Number(ys) * cell + cell / 2;
+        const cx = Number(xs);
+        const cy = Number(ys);
+        if (theme.fanOutMarker) {
+          // A theme that marks junctions itself gets the cell and the group's
+          // value; the site draws a ring with the pane showing through.
+          theme.fanOutMarker({
+            ctx, theme: theme as CircTheme<string>, cell,
+            x: cx, y: cy, value: v, signal: signalOf(v),
+          });
+          continue;
+        }
+        const x = cx * cell + cell / 2;
+        const y = cy * cell + cell / 2;
         ctx.beginPath();
         ctx.arc(x, y, cell * 0.18, 0, Math.PI * 2);
         ctx.fill();

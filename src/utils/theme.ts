@@ -121,6 +121,24 @@ export interface PortMarkerContext<C extends string = ThemeColorKey> {
 }
 
 /**
+ * What a theme is handed to mark one fan-out junction: a cell where three or
+ * more segments of one source's wires meet, so a signal visibly splits there.
+ * Called once per junction, after every skin and before the port markers, in
+ * place of the default dot.
+ */
+export interface FanOutMarkerContext<C extends string = ThemeColorKey> {
+  ctx: CanvasRenderingContext2D;
+  theme: CircTheme<C>;
+  cell: number;
+  /** Junction cell, in CELL coordinates (cell-center is at (x+0.5, y+0.5)). */
+  x: number;
+  y: number;
+  /** Width-aware value the fan-out group carries, and its collapsed signal. */
+  value: BitValue;
+  signal: Signal;
+}
+
+/**
  * What a theme is handed to draw the highlight on one component. It is drawn
  * once per highlighted component, after every skin, marker and badge, so it
  * sits on top of whatever the skin drew.
@@ -169,6 +187,13 @@ export interface CircTheme<C extends string = ThemeColorKey> {
    * unfilled-circle + filled-arrow pair is drawn.
    */
   portMarker?: (args: PortMarkerContext<C>) => void;
+  /**
+   * Override how a fan-out junction is marked, or pass a no-op to mark none.
+   * Called once per cell where three or more segments of one source's wires
+   * meet. If absent, a filled dot of 0.18 cells is stamped in the wire's
+   * colour.
+   */
+  fanOutMarker?: (args: FanOutMarkerContext<C>) => void;
   /**
    * Override how a multi-bit net's value badge is drawn above its box, or
    * pass a no-op to draw none. If absent, the value is written centred just

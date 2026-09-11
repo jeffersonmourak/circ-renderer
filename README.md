@@ -215,6 +215,18 @@ The path is the route only. The stubs from a source box into its `out` port
 and from an `in` port into a destination box are drawn by the default wire
 painter and are the hook's to draw, or not, when it takes over.
 
+### Fan-out junctions
+
+Where one source's wires split — a cell three or more of their segments
+touch — the canvas stamps a filled dot of 0.18 cells in the wire's colour. A
+theme can take that over with `fanOutMarker({ ctx, theme, cell, x, y, value,
+signal })`, called once per junction after every skin and before the port
+markers, with the junction in cell coordinates and the value the group
+carries; pass a no-op to mark none. A transparent canvas that wants the page
+to show through the middle of a ring should knock the centre out with
+`globalCompositeOperation = "destination-out"` rather than fill it with
+`background`.
+
 ### Importing just the topology
 
 `circ-renderer/topology` exports the decoder and its types — `ComponentKind`,
