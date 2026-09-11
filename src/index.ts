@@ -35,7 +35,7 @@ export type {
   NodeKind,
 } from "./layout";
 
-export { CircCanvas } from "./render/canvas";
+export { CircCanvas, junctionCells } from "./render/canvas";
 export type { RenderOptions, PinEditRequest } from "./render/canvas";
 
 export {

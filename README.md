@@ -227,12 +227,13 @@ painter and are the hook's to draw, or not, when it takes over.
 
 ### Fan-out junctions
 
-Where one source's wires split — a cell three or more of their segments
-touch — the canvas stamps a filled dot of 0.18 cells in the wire's colour. A
-theme can take that over with `fanOutMarker({ ctx, theme, cell, x, y, value,
-signal })`, called once per junction after every skin and before the port
-markers, with the junction in cell coordinates and the value the group
-carries; pass a no-op to mark none. A transparent canvas that wants the page
+Where one source's wires branch — a cell the net leaves in three or more
+directions, so a trunk several wires share marks nothing along its run — the
+canvas stamps a filled dot of 0.18 cells in the wire's colour. A theme can
+take that over with `fanOutMarker({ ctx, theme, cell, x, y, value, signal })`,
+called once per junction after every skin and before the port markers, with
+the junction in cell coordinates and the value the group carries; pass a
+no-op to mark none. `junctionCells(wires)` is the rule, exported. A transparent canvas that wants the page
 to show through the middle of a ring should knock the centre out with
 `globalCompositeOperation = "destination-out"` rather than fill it with
 `background`.

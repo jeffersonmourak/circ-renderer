@@ -27,6 +27,35 @@ export interface PinEditRequest {
   cancel: () => void;
 }
 
+/**
+ * The cells where a group of wires from one source branch: every cell the
+ * union of their segments leaves in three or more directions. Sorted
+ * `"x,y"` keys, so a caller draws in a stable order.
+ */
+export function junctionCells(group: readonly RoutedWire[]): string[] {
+  const neighbours = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (!neighbours.has(a)) neighbours.set(a, new Set());
+    neighbours.get(a)!.add(b);
+  };
+  for (const w of group) {
+    for (const seg of w.segments) {
+      const dx = Math.sign(seg.to.x - seg.from.x);
+      const dy = Math.sign(seg.to.y - seg.from.y);
+      const len = Math.max(Math.abs(seg.to.x - seg.from.x), Math.abs(seg.to.y - seg.from.y));
+      for (let k = 0; k < len; k++) {
+        const a = `${seg.from.x + dx * k},${seg.from.y + dy * k}`;
+        const b = `${seg.from.x + dx * (k + 1)},${seg.from.y + dy * (k + 1)}`;
+        link(a, b);
+        link(b, a);
+      }
+    }
+  }
+  const out: string[] = [];
+  for (const [key, set] of neighbours) if (set.size >= 3) out.push(key);
+  return out.sort();
+}
+
 export interface RenderOptions<C extends string = ThemeColorKey> {
   /** Pixel width of one layout cell. Default 12. */
   cell?: number;
@@ -838,9 +867,13 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   }
 
   /**
-   * Walk every same-source wire group, count how many segments touch each
-   * cell (interior + endpoints), and stamp `●` where ≥3 segment touches
-   * land. Mirrors the CLI's fan-out glyph rule.
+   * Mark every cell where a source's wires branch: fold the group's segments
+   * into one graph of adjacent cells and stamp `●` on every cell the net
+   * leaves in three or more directions. A trunk that several wires share
+   * is degree two along its run and marks nothing; a bend they all take is
+   * degree two; only a tap is three. The old rule counted segment touches,
+   * which marked every cell of a shared trunk — invisible while the dot was
+   * the wire's own colour, a ring on every cell once a theme drew one.
    */
   private drawFanOutMarkers(compById: Map<number, PlacedComponent>): void {
     const { ctx, cell, layout, theme } = this;
@@ -853,24 +886,11 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     }
     for (const [, group] of bySrc) {
       if (group.length < 2) continue; // single wire can't fan out
-      const counts = new Map<string, number>();
-      for (const w of group) {
-        for (const seg of w.segments) {
-          const dx = Math.sign(seg.to.x - seg.from.x);
-          const dy = Math.sign(seg.to.y - seg.from.y);
-          const len = Math.max(Math.abs(seg.to.x - seg.from.x), Math.abs(seg.to.y - seg.from.y));
-          for (let k = 0; k <= len; k++) {
-            const key = `${seg.from.x + dx * k},${seg.from.y + dy * k}`;
-            counts.set(key, (counts.get(key) ?? 0) + 1);
-          }
-        }
-      }
       // All wires in a fan-out group share a real driver, so any of them
       // works for picking the dot color.
       const v = this.signals.get(group[0].realSrcId) ?? undefinedValue(1);
       ctx.fillStyle = theme.colors[wireColorKey(wireStyleOf(v))] ?? "#444";
-      for (const [key, n] of counts) {
-        if (n < 3) continue;
+      for (const key of junctionCells(group)) {
         const [xs, ys] = key.split(",");
         const cx = Number(xs);
         const cy = Number(ys);

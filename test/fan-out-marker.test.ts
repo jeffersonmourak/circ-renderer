@@ -7,7 +7,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CircRuntime } from "../src/wasm/runtime";
-import { CircCanvas } from "../src/render/canvas";
+import { CircCanvas, junctionCells as junctionsOf } from "../src/render/canvas";
+import type { RoutedWire } from "../src/layout";
 import { baseTheme } from "../src/utils/theme";
 import type { FanOutMarkerContext } from "../src/utils/theme";
 import { installStubDocument } from "./canvas-stub";
@@ -43,30 +44,33 @@ async function fanOut() {
   return CircRuntime.loadFromBytes(new Uint8Array(readFileSync(join(FIX, "fan_out.wasm"))));
 }
 
-/** The cells three or more segments of one source's wires touch — the rule
- *  `drawFanOutMarkers` applies, restated over the layout the canvas drew. */
+/**
+ * Where a source's wires branch, restated as a property rather than a copy
+ * of the rule: a marked cell must have three or more distinct neighbouring
+ * cells on the group's wires, and every such cell must be marked.
+ */
 function junctionCells(canvas: CircCanvas): string[] {
-  const bySrc = new Map<number, { x: number; y: number }[][]>();
+  const bySrc = new Map<number, RoutedWire[]>();
   for (const w of canvas.getLayout().wires) {
-    const cells: { x: number; y: number }[] = [];
-    for (const seg of w.segments) {
-      const dx = Math.sign(seg.to.x - seg.from.x);
-      const dy = Math.sign(seg.to.y - seg.from.y);
-      const len = Math.max(Math.abs(seg.to.x - seg.from.x), Math.abs(seg.to.y - seg.from.y));
-      for (let k = 0; k <= len; k++) cells.push({ x: seg.from.x + dx * k, y: seg.from.y + dy * k });
-    }
     if (!bySrc.has(w.srcId)) bySrc.set(w.srcId, []);
-    bySrc.get(w.srcId)!.push(cells);
+    bySrc.get(w.srcId)!.push(w);
   }
   const out: string[] = [];
   for (const group of bySrc.values()) {
     if (group.length < 2) continue;
-    const counts = new Map<string, number>();
-    for (const cells of group) for (const c of cells) {
-      const k = `${c.x},${c.y}`;
-      counts.set(k, (counts.get(k) ?? 0) + 1);
+    const touches = new Map<string, Set<string>>();
+    for (const w of group) for (const seg of w.segments) {
+      const dx = Math.sign(seg.to.x - seg.from.x);
+      const dy = Math.sign(seg.to.y - seg.from.y);
+      const len = Math.max(Math.abs(seg.to.x - seg.from.x), Math.abs(seg.to.y - seg.from.y));
+      for (let k = 0; k <= len; k++) {
+        const here = `${seg.from.x + dx * k},${seg.from.y + dy * k}`;
+        if (!touches.has(here)) touches.set(here, new Set());
+        if (k > 0) touches.get(here)!.add(`${seg.from.x + dx * (k - 1)},${seg.from.y + dy * (k - 1)}`);
+        if (k < len) touches.get(here)!.add(`${seg.from.x + dx * (k + 1)},${seg.from.y + dy * (k + 1)}`);
+      }
     }
-    for (const [k, n] of counts) if (n >= 3) out.push(k);
+    for (const [k, n] of touches) if (n.size >= 3) out.push(k);
   }
   return out.sort();
 }
@@ -109,4 +113,27 @@ test("the default dot is drawn only without the hook", async () => {
   const theme = { ...baseTheme, fanOutMarker: () => {} };
   new CircCanvas(rt, { interactive: false, theme: theme as never, cell });
   expect(dotsAt(junctions)).toEqual([]);
+});
+
+test("a trunk that several wires share is not a run of junctions", () => {
+  // Four wires off one source: a straight trunk down, and a branch off it
+  // at every other cell. The old rule (three or more segment touches) marked
+  // every trunk cell; the branch rule marks the three taps only.
+  const seg = (x0: number, y0: number, x1: number, y1: number) => ({ from: { x: x0, y: y0 }, to: { x: x1, y: y1 } });
+  const wire = (segments: RoutedWire["segments"]): RoutedWire =>
+    ({ srcId: 1, srcPort: 3, dstId: 2, dstPort: 0, realSrcId: 1, segments, crossings: [] });
+  const group = [
+    wire([seg(0, 0, 4, 0), seg(4, 0, 4, 6), seg(4, 6, 8, 6)]),
+    wire([seg(0, 0, 4, 0), seg(4, 0, 4, 4), seg(4, 4, 8, 4)]),
+    wire([seg(0, 0, 4, 0), seg(4, 0, 4, 2), seg(4, 2, 8, 2)]),
+    wire([seg(0, 0, 4, 0), seg(4, 0, 8, 0)]),
+  ];
+  expect(junctionsOf(group)).toEqual(["4,0", "4,2", "4,4"]);
+  // Two wires that share a bend and part ways later: one junction, at the parting.
+  expect(junctionsOf([
+    wire([seg(0, 0, 3, 0), seg(3, 0, 3, 3), seg(3, 3, 6, 3)]),
+    wire([seg(0, 0, 3, 0), seg(3, 0, 3, 5), seg(3, 5, 6, 5)]),
+  ])).toEqual(["3,3"]);
+  // A single wire never branches.
+  expect(junctionsOf([wire([seg(0, 0, 3, 0), seg(3, 0, 3, 3)])])).toEqual([]);
 });
