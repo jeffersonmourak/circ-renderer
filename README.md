@@ -42,6 +42,10 @@ Multi-bit nets (buses, widths 1–64) are supported: bus wires render heavier in
 | `onPinEdit`    | `(req) => boolean \| void`         | called when a reader clicks a pin wider than one bit. Return `true` to open your own editor; the built-in field then stays closed. `req` carries the pin's `id`, its current `value`, its `box` in CSS pixels relative to the canvas, and `commit(value, defined)` / `cancel()` |
 | `valueFormat`  | `'hex' \| 'binary' \| 'decimal'`  | the base the bus badge is written in and a bare typed value is read in. Default `hex`. `0x` and `0b` in the field override it |
 | `onHover`      | `(id \| null) => void`              | called when the pointer moves onto a different component box, and with `null` on leave; fires only on a change, so a host can drive an editor highlight straight from it |
+| `navigation`   | `boolean \| NavigationOptions` (default true) | the gestures that zoom and pan; see below. `false` attaches none |
+| `viewport`     | `{ width, height } \| 'parent'`    | the element's size instead of the grid's; see below |
+| `onViewChange` | `(view) => void`                    | called after a zoom or a pan, once per change and never for the view a canvas is built with |
+| `minZoom`, `maxZoom` | `number` (default 0.25, 8)    | the range the scale keeps to |
 
 Returns `{ runtime, view, canvas, destroy() }`.
 
@@ -78,7 +82,8 @@ the theme's `background`, `label` and `stroke`.
 
 A single-bit pin keeps its click-to-toggle exactly as before.
 
-`CircCanvas` also exposes these host hooks:
+`CircCanvas` also exposes these host hooks (the view's own are under
+[Zoom and pan](#zoom-and-pan)):
 
 - `view.setInputValue(id, value, defined)` drives an input pin to an exact
   value, masked to its width, and redraws. `view.setInputSignal(id, signal)` is
@@ -91,6 +96,60 @@ A single-bit pin keeps its click-to-toggle exactly as before.
 
 - `view.setHighlight(id | null)` highlights one component from outside the canvas — an editor cursor, a table header — through the same `hovered` flag the pointer drives, so a skin needs no second branch. `null` clears it, and an id with no box is a no-op.
 - `view.getLayout()` returns the `LayoutGrid` the canvas drew. A host needs it to map a declared name to a box: a collapsed subcircuit carries a synthetic id that exists only in the layout, never in `runtime.topology.components`.
+
+### Zoom and pan
+
+A reader can move the picture without touching the circuit. Drag with the
+mouse to pan. Hold Ctrl or ⌘ and turn the wheel to zoom about the pointer;
+a trackpad pinch arrives the same way. A plain wheel is left to the page,
+so a reader can scroll past a canvas. On a touch screen one finger is the
+page's too: it scrolls, and a tap clicks a pin. Two fingers pinch to zoom.
+
+None of this reaches the simulation. A press that moves less than four
+pixels is a click, and toggles or opens the pin under it exactly as
+before. A press that moves further is a pan; the hover is frozen while it
+lasts, and the click the browser fires after it is swallowed. A zoom keeps
+the point under the pointer where it is, so the pin a reader is looking at
+does not slide away. A view change closes an open value field, the way a
+scroll does, and drives nothing.
+
+`navigation` chooses the gestures:
+
+| field   | values                              | default    |
+|---------|-------------------------------------|------------|
+| `wheel` | `'modifier'`, `'always'`, `'off'`   | `modifier` — `always` zooms on a plain wheel too, for a host whose pane the canvas fills |
+| `drag`  | `boolean`                           | `true` — a mouse drag pans |
+| `touch` | `'page'`, `'own'`                   | `page` — `own` lets one finger pan, for a host with nowhere else to scroll |
+
+The view is where the circuit sits in the element: `{ scale, x, y }` maps a
+world pixel to an element pixel as `world * scale + (x, y)`. The default is
+`{ 1, padding, padding }`, the grid one padding in at its natural size, so a
+canvas that is never zoomed draws as it always did. A host reads and moves
+it:
+
+- `view.getView()` returns a copy of the current view.
+- `view.setView(view)` places the circuit. The scale is clamped to the range.
+- `view.zoomBy(factor, about?)` zooms by a factor about a point in the
+  element, in the CSS pixels `boxOf` reports in; without a point, about the
+  centre.
+- `view.fit()` shows the whole circuit, centred, with the padding kept
+  clear. At the element's natural size that is the default view.
+- `view.resetView()` goes back to the default view.
+
+A toolbar with **−**, **+**, **Fit** and **100%** is those four calls;
+`onViewChange` keeps its zoom label in step. `setCell` and `setPadding`
+start again from the default view, since a pan is measured in pixels of the
+old cell.
+
+By default the element is as big as the circuit, and a zoom moves the
+picture inside that: zoomed in, the edges are clipped and a pan brings them
+back; zoomed out, there is margin. `viewport` gives the element a size of
+its own instead. `{ width, height }` is that size in CSS pixels. `'parent'`
+fills the parent and follows it as it changes, so the host gives the parent
+a size and appends the canvas; a canvas built before it is mounted measures
+itself once it is. Either way the circuit starts fitted to the element, and
+`view.setViewport(size | 'parent' | null)` changes the sizing in place, with
+`null` for the grid's own size again.
 
 ### Changing the look of a live canvas
 
@@ -237,6 +296,19 @@ no-op to mark none. `junctionCells(wires)` is the rule, exported. A transparent 
 to show through the middle of a ring should knock the centre out with
 `globalCompositeOperation = "destination-out"` rather than fill it with
 `background`.
+
+### The background
+
+Without a `background` hook the canvas fills what the element shows in the
+`background` colour: the grid and its padding at the default view, and the
+whole element under a zoom. A hook is called instead, with the grid's extent
+in cells and, since the canvas can zoom, the `view` and the element's
+`viewport` in CSS pixels. The context is already transformed by the view, so
+a hook that fills the grid keeps drawing in cells. One that wants the whole
+element has its edges in world pixels: `-view.x / view.scale` is the left
+edge and `viewport.width / view.scale` the width. A hook that clears the
+canvas can keep clearing the grid alone: the canvas clears the whole bitmap
+before it draws.
 
 ### Importing just the topology
 

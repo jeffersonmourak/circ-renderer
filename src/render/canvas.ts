@@ -132,6 +132,15 @@ export interface RenderOptions<C extends string = ThemeColorKey> {
    * clicks can still be zoomed.
    */
   navigation?: boolean | NavigationOptions;
+  /**
+   * The element's size, instead of the grid's. Without it the element is as
+   * big as the circuit, and a zoom moves the picture inside that. With a
+   * size, the element is that size in CSS pixels; with `parent`, it fills
+   * its parent and follows the parent's size, so a host gives the parent a
+   * size of its own and appends the canvas. Either way the view starts at
+   * `fit`, the whole circuit centred in the element.
+   */
+  viewport?: Size | "parent";
 }
 
 /**
@@ -207,6 +216,10 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   /** Set when a pan or a pinch ends, so the click the browser fires next
    *  reaches no pin. Consumed by that click, or by the next pointer down. */
   private swallowClick = false;
+  /** Under `viewport: "parent"`, the element's size as last observed; null
+   *  until it is mounted and measured, when the grid's size stands in. */
+  private measured: Size | null = null;
+  private observer: { disconnect(): void } | null = null;
 
   /** Per-wire value (snapshot of source's output). Recomputed on refresh. */
   private wireValue = new Map<number, BitValue>();
@@ -237,6 +250,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     this.ctx = ctx;
     this.view = this.defaultView();
     this.resize();
+    this.watchParent();
     this.computeWireTiers();
     for (const w of this.layout.wires) {
       if (!this.realDriverByComp.has(w.srcId)) {
@@ -247,6 +261,9 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     // view is moving before the hover asks.
     if (options.navigation !== false) this.attachNavigation();
     if (options.interactive ?? true) this.attach();
+    // A sized element starts with the circuit fitted to it; the one that
+    // fills its parent fits once the parent has been measured.
+    if (options.viewport && options.viewport !== "parent") this.view = this.fitted();
     this.refreshState();
   }
 
@@ -401,9 +418,54 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   /** Show the whole grid, centred, with the padding kept clear on every side.
    *  At the element's natural size this is the default view. */
   fit(): void {
+    this.changeView(this.fitted());
+  }
+
+  private fitted(): View {
     const { cell, layout } = this;
     const grid = { width: layout.width * cell, height: layout.height * cell };
-    this.changeView(fitView(grid, this.extent(), this.padding, this.minZoom, this.maxZoom));
+    return fitView(grid, this.extent(), this.padding, this.minZoom, this.maxZoom);
+  }
+
+  /**
+   * Change the element's sizing in place: a size, `parent`, or `null` for the
+   * grid's own size again. The element resizes and the circuit is fitted to
+   * it, the way it is when a canvas is built with the option.
+   */
+  setViewport(viewport: Size | "parent" | null): void {
+    this.options = { ...this.options, viewport: viewport ?? undefined };
+    this.observer?.disconnect();
+    this.observer = null;
+    this.measured = null;
+    this.resize();
+    this.watchParent();
+    if (!this.changeView(viewport ? this.fitted() : this.defaultView())) this.draw();
+  }
+
+  /**
+   * Follow the parent's size under `viewport: "parent"`. The element is told
+   * to fill its parent and its own box is observed, so no reference to the
+   * parent is needed and a canvas built before it is mounted measures itself
+   * once it is. The first measurement fits the circuit; a later one keeps
+   * the view, so a pane that grows shows more rather than something else.
+   */
+  private watchParent(): void {
+    if (this.options.viewport !== "parent") return;
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[entries.length - 1]?.contentRect;
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      const next = { width: rect.width, height: rect.height };
+      if (this.measured && this.measured.width === next.width && this.measured.height === next.height) return;
+      const first = this.measured === null;
+      this.measured = next;
+      // The field sat over a pin that has moved with the element's edge.
+      this.closeEditor();
+      this.resize();
+      if (!(first && this.changeView(this.fitted()))) this.draw();
+    });
+    observer.observe(this.canvas);
+    this.observer = observer;
   }
 
   /** Apply a view if it differs from the current one. True when it did. */
@@ -420,8 +482,12 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     return true;
   }
 
-  /** The element's drawn size in CSS pixels: the grid plus its padding. */
+  /** The element's drawn size in CSS pixels: the viewport the host asked
+   *  for, the parent's size once measured, or the grid plus its padding. */
   private extent(): Size {
+    const { viewport } = this.options;
+    if (viewport && viewport !== "parent") return { width: viewport.width, height: viewport.height };
+    if (viewport === "parent" && this.measured) return this.measured;
     const { cell, padding, layout } = this;
     return { width: layout.width * cell + padding * 2, height: layout.height * cell + padding * 2 };
   }
@@ -477,8 +543,14 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   resize(): void {
     const { dpr } = this;
     const { width: w, height: h } = this.extent();
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    if (this.options.viewport === "parent") {
+      this.canvas.style.width = "100%";
+      this.canvas.style.height = "100%";
+      this.canvas.style.display = "block";
+    } else {
+      this.canvas.style.width = `${w}px`;
+      this.canvas.style.height = `${h}px`;
+    }
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
     // Sizing the backing store resets the context; the view has to be
@@ -503,6 +575,8 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
   destroy(): void {
     this.closeEditor();
+    this.observer?.disconnect();
+    this.observer = null;
     for (const off of this.listeners) off();
     this.listeners = [];
     this.canvas.remove();
