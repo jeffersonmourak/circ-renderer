@@ -125,7 +125,45 @@ export interface RenderOptions<C extends string = ThemeColorKey> {
   /** The zoom range `setView` and `zoomBy` keep to. Default 0.25 and 8. */
   minZoom?: number;
   maxZoom?: number;
+  /**
+   * The gestures that move the view. On by default, with the defaults in
+   * `NavigationOptions`; `false` attaches none, and the view then moves only
+   * through the API. Independent of `interactive`: a canvas that takes no pin
+   * clicks can still be zoomed.
+   */
+  navigation?: boolean | NavigationOptions;
 }
+
+/**
+ * Which gestures move the view. Each is chosen so that it cannot be mistaken
+ * for a click on a pin, or take a gesture the page needs.
+ */
+export interface NavigationOptions {
+  /**
+   * Which wheel zooms, about the pointer. `modifier` (default): a wheel with
+   * Ctrl or ⌘ held, which is also what a trackpad pinch arrives as; a plain
+   * wheel stays the page's, so a reader can scroll past the canvas. `always`:
+   * every wheel, for a host whose pane the canvas fills. `off`: none.
+   */
+  wheel?: "modifier" | "always" | "off";
+  /**
+   * A drag with the primary or middle mouse button pans. Default true. A
+   * press that moves less than four pixels is a click, and reaches the pin
+   * under it exactly as before; one that moves further is a pan, and the
+   * click the browser fires after it is swallowed.
+   */
+  drag?: boolean;
+  /**
+   * What a touch does. `page` (default): one finger is the page's — it
+   * scrolls, and a tap clicks a pin — and two fingers pinch to zoom and pan.
+   * `own`: one finger pans too, for a host whose pane the canvas fills and
+   * that has nowhere else to scroll.
+   */
+  touch?: "page" | "own";
+}
+
+/** A press becomes a pan once it has moved this far, in CSS pixels. */
+const DRAG_THRESHOLD = 4;
 
 const DEFAULTS = { cell: 12, padding: 4 };
 
@@ -151,6 +189,24 @@ export class CircCanvas<C extends string = ThemeColorKey> {
    * so a zoom cannot move the picture without moving where a click lands.
    */
   private view: View = { scale: 1, x: 0, y: 0 };
+  /** Every pointer down on the canvas, by id, in CSS pixels of the rendered
+   *  rect. Two at once is a pinch. */
+  private pointers = new Map<number, { x: number; y: number }>();
+  /**
+   * The gesture in progress. A `press` is a pointer down that has not yet
+   * moved far enough to be a pan, and may still be a click; a `pan` and a
+   * `pinch` move the view and end with the trailing click swallowed. Pinch
+   * keeps its starting view and its starting pair, so each move is computed
+   * from the start rather than accumulated, and cannot drift.
+   */
+  private gesture:
+    | { kind: "press"; id: number; x: number; y: number }
+    | { kind: "pan"; id: number; x: number; y: number }
+    | { kind: "pinch"; view: View; mid: { x: number; y: number }; dist: number }
+    | null = null;
+  /** Set when a pan or a pinch ends, so the click the browser fires next
+   *  reaches no pin. Consumed by that click, or by the next pointer down. */
+  private swallowClick = false;
 
   /** Per-wire value (snapshot of source's output). Recomputed on refresh. */
   private wireValue = new Map<number, BitValue>();
@@ -187,6 +243,9 @@ export class CircCanvas<C extends string = ThemeColorKey> {
         this.realDriverByComp.set(w.srcId, w.realSrcId);
       }
     }
+    // The gestures first: on one pointer move, the gesture decides whether the
+    // view is moving before the hover asks.
+    if (options.navigation !== false) this.attachNavigation();
     if (options.interactive ?? true) this.attach();
     this.refreshState();
   }
@@ -239,6 +298,11 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   private get valueFormat(): ValueFormat { return this.options.valueFormat ?? "hex"; }
   private get minZoom(): number { return this.options.minZoom ?? DEFAULT_ZOOM.min; }
   private get maxZoom(): number { return this.options.maxZoom ?? DEFAULT_ZOOM.max; }
+  private get navigation(): Required<NavigationOptions> {
+    const o = this.options.navigation;
+    const given = typeof o === "object" && o !== null ? o : {};
+    return { wheel: given.wheel ?? "modifier", drag: given.drag ?? true, touch: given.touch ?? "page" };
+  }
   private get dpr(): number {
     return (typeof window !== "undefined" && window.devicePixelRatio) || 1;
   }
@@ -445,9 +509,21 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   }
 
   private attach(): void {
-    const onMove = (e: PointerEvent) => this.setHover(this.componentAtEvent(e));
+    // No hover while the view is moving under the pointer: the box under it
+    // changes with every pan, and a host listening to `onHover` would be told
+    // about each one.
+    const onMove = (e: PointerEvent) => {
+      if (this.moving()) return;
+      this.setHover(this.componentAtEvent(e));
+    };
     const onLeave = () => this.setHover(null);
     const onClick = (e: MouseEvent) => {
+      // The click the browser fires after a pan or a pinch: the reader moved
+      // the picture, and drove nothing.
+      if (this.swallowClick) {
+        this.swallowClick = false;
+        return;
+      }
       const id = this.componentAtEvent(e);
       if (id === null || !this.isToggleable(id)) return;
       // A bus is a value, not a switch: a click opens a field rather than
@@ -487,9 +563,187 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   private setHover(id: number | null): void {
     if (id === this.hoverId) return;
     this.hoverId = id;
-    this.canvas.style.cursor = id !== null && this.isToggleable(id) ? "pointer" : "default";
+    this.updateCursor();
     this.draw();
     this.options.onHover?.(id);
+  }
+
+  /** Grabbing while the view moves, a pointer over a pin, a default elsewhere. */
+  private updateCursor(): void {
+    const id = this.hoverId;
+    this.canvas.style.cursor = this.moving() ? "grabbing"
+      : id !== null && this.isToggleable(id) ? "pointer"
+      : "default";
+  }
+
+  /** Whether a pan or a pinch is in progress. */
+  private moving(): boolean {
+    return this.gesture !== null && this.gesture.kind !== "press";
+  }
+
+  // ---- the gestures ---------------------------------------------------------
+  //
+  // The rule these keep: a gesture that moves the view never reaches the
+  // simulation, and a click never moves the view. A pointer down is a press
+  // until it has moved DRAG_THRESHOLD pixels; under that, the pointer up is a
+  // click and the toggle or the value field runs exactly as before. Over it,
+  // the press is a pan, the hover is frozen, and the click the browser fires
+  // afterwards is swallowed. A second pointer makes a pinch. A wheel zooms
+  // only with a modifier held, unless the host says otherwise, so the page
+  // keeps its scroll; a wheel that zooms keeps the world point under the
+  // pointer where it is.
+
+  private attachNavigation(): void {
+    const { canvas } = this;
+    const nav = this.navigation;
+    // One finger is the page's under `page`: it scrolls, and a tap clicks.
+    // Declaring that is what lets the browser scroll past a canvas on a
+    // phone, and what stops it pinch-zooming the page when two fingers land.
+    canvas.style.touchAction = nav.touch === "own" ? "none" : "pan-x pan-y";
+    // A drag across a canvas would otherwise start selecting the text round
+    // it in some browsers.
+    canvas.style.userSelect = "none";
+    (canvas.style as unknown as Record<string, string>).webkitUserSelect = "none";
+
+    const onDown = (e: PointerEvent) => this.pointerDown(e);
+    const onMove = (e: PointerEvent) => this.pointerMove(e);
+    const onUp = (e: PointerEvent) => this.pointerUp(e);
+    const onWheel = (e: WheelEvent) => this.wheel(e);
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    this.listeners.push(
+      () => canvas.removeEventListener("pointerdown", onDown),
+      () => canvas.removeEventListener("pointermove", onMove),
+      () => canvas.removeEventListener("pointerup", onUp),
+      () => canvas.removeEventListener("pointercancel", onUp),
+      () => canvas.removeEventListener("wheel", onWheel),
+    );
+  }
+
+  /** A pointer's place in the rendered rect, in CSS pixels. */
+  private pointAt(e: { clientX: number; clientY: number }): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  private pointerDown(e: PointerEvent): void {
+    const nav = this.navigation;
+    // A stale flag from a pan whose click never came must not eat this one.
+    this.swallowClick = false;
+    const touch = e.pointerType === "touch";
+    if (!touch && e.button !== 0 && e.button !== 1) return;
+    if (!touch && !nav.drag) return;
+    const p = this.pointAt(e);
+    this.pointers.set(e.pointerId, p);
+
+    if (this.pointers.size >= 2) {
+      // Two down: a pinch, from these two, whatever the first was doing.
+      const [a, b] = [...this.pointers.values()];
+      this.gesture = { kind: "pinch", view: this.getView(), mid: midpoint(a, b), dist: distance(a, b) };
+      this.capture(e.pointerId);
+      this.updateCursor();
+      return;
+    }
+    // One finger under `page` is the page's: no press, so no pan can follow.
+    // It is still tracked, so a second finger can make a pinch of the two.
+    if (touch && nav.touch === "page") return;
+    // The middle button would otherwise start the browser's autoscroll.
+    if (e.button === 1) e.preventDefault();
+    this.gesture = { kind: "press", id: e.pointerId, x: p.x, y: p.y };
+    this.capture(e.pointerId);
+  }
+
+  private pointerMove(e: PointerEvent): void {
+    if (!this.pointers.has(e.pointerId)) return;
+    const p = this.pointAt(e);
+    this.pointers.set(e.pointerId, p);
+    const g = this.gesture;
+    if (!g) return;
+
+    if (g.kind === "pinch") {
+      const [a, b] = [...this.pointers.values()];
+      if (!a || !b) return;
+      const mid = midpoint(a, b);
+      const dist = distance(a, b);
+      if (g.dist === 0) return;
+      // From the start, not from the last move: the world point under the
+      // starting midpoint lands under the current one, at the scale the
+      // fingers' spread says, and rounding never accumulates.
+      const scale = clampScale(g.view.scale * (dist / g.dist), this.minZoom, this.maxZoom);
+      const k = scale / g.view.scale;
+      const m0 = this.intendedPoint(g.mid.x, g.mid.y);
+      const m1 = this.intendedPoint(mid.x, mid.y);
+      this.changeView({ scale, x: m1.x - (m0.x - g.view.x) * k, y: m1.y - (m0.y - g.view.y) * k });
+      return;
+    }
+    if (g.id !== e.pointerId) return;
+    if (g.kind === "press") {
+      if (Math.hypot(p.x - g.x, p.y - g.y) < DRAG_THRESHOLD) return;
+      this.gesture = { kind: "pan", id: g.id, x: g.x, y: g.y };
+      this.updateCursor();
+    }
+    const pan = this.gesture as { kind: "pan"; id: number; x: number; y: number };
+    // The delta is in the rendered rect; the view is in the drawn size.
+    const from = this.intendedPoint(pan.x, pan.y);
+    const to = this.intendedPoint(p.x, p.y);
+    pan.x = p.x;
+    pan.y = p.y;
+    const { scale, x, y } = this.view;
+    this.changeView({ scale, x: x + (to.x - from.x), y: y + (to.y - from.y) });
+  }
+
+  private pointerUp(e: PointerEvent): void {
+    if (!this.pointers.has(e.pointerId)) return;
+    this.pointers.delete(e.pointerId);
+    this.release(e.pointerId);
+    const g = this.gesture;
+    if (!g) return;
+    if (g.kind === "pinch") {
+      // A pinch ends when either finger lifts. The other is still down and
+      // still tracked, but starts nothing: under `page` it is the page's,
+      // and under `own` a fresh press is a fresh gesture.
+      this.gesture = null;
+      this.swallowClick = true;
+      this.updateCursor();
+      return;
+    }
+    if (g.id !== e.pointerId) return;
+    this.gesture = null;
+    if (g.kind === "pan") {
+      this.swallowClick = true;
+      this.updateCursor();
+    }
+    // A press that never became a pan ends here with nothing to do: the
+    // click that follows is a real one, and reaches the pin.
+  }
+
+  private wheel(e: WheelEvent): void {
+    const policy = this.navigation.wheel;
+    if (policy === "off") return;
+    if (policy === "modifier" && !e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    // Lines and pages are turned into pixels first; then one mouse notch of a
+    // hundred pixels halves or doubles, and a trackpad pinch, which arrives
+    // as many small deltas, zooms smoothly by the same rule. No single event
+    // jumps more than a factor of two.
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
+    const factor = Math.min(2, Math.max(0.5, Math.pow(2, -dy / 100)));
+    if (factor === 1) return;
+    const p = this.pointAt(e);
+    this.zoomBy(factor, p);
+  }
+
+  private capture(id: number): void {
+    try { this.canvas.setPointerCapture(id); } catch { /* a pointer already gone */ }
+  }
+
+  private release(id: number): void {
+    try {
+      if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);
+    } catch { /* already released */ }
   }
 
   /**
@@ -1178,3 +1432,6 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     ctx.stroke();
   }
 }
+
+const midpoint = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(b.x - a.x, b.y - a.y);

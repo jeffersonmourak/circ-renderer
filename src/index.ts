@@ -36,7 +36,7 @@ export type {
 } from "./layout";
 
 export { CircCanvas, junctionCells } from "./render/canvas";
-export type { RenderOptions, PinEditRequest } from "./render/canvas";
+export type { RenderOptions, PinEditRequest, NavigationOptions } from "./render/canvas";
 export { DEFAULT_ZOOM, zoomAbout, fitView } from "./render/view";
 export type { View, Size } from "./render/view";
 

@@ -19,6 +19,11 @@ export interface StubCanvas {
   removeEventListener(type: string, fn: (e: unknown) => void): void;
   dispatchEvent(type: string, event: unknown): void;
   getBoundingClientRect(): { left: number; top: number; width: number; height: number };
+  /** The pointers the canvas holds captured, by id. */
+  captured: Set<number>;
+  setPointerCapture(id: number): void;
+  releasePointerCapture(id: number): void;
+  hasPointerCapture(id: number): boolean;
 }
 
 /** Every 2D-context member is a no-op; assignments to state are just kept. */
@@ -69,6 +74,10 @@ export function makeStubCanvas(): StubCanvas {
       width: Number.parseFloat(el.style.width ?? '0') || el.width,
       height: Number.parseFloat(el.style.height ?? '0') || el.height,
     }),
+    captured: new Set<number>(),
+    setPointerCapture(id) { el.captured.add(id); },
+    releasePointerCapture(id) { el.captured.delete(id); },
+    hasPointerCapture(id) { return el.captured.has(id); },
   };
   return el;
 }

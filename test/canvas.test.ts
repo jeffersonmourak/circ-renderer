@@ -150,11 +150,14 @@ test("onHover fires only on a change", async () => {
   expect(calls).toEqual([box.id, null]);
 });
 
+/** The pin listeners and, since navigation is on by default, the gesture ones. */
+const ALL_LISTENERS = ["click", "pointercancel", "pointerdown", "pointerleave", "pointermove", "pointerup", "wheel"];
+
 test("destroy removes every listener it attached", async () => {
   const rt = await halfAdder();
   const canvas = new CircCanvas(rt, {});
   const el = stub.created[0];
-  expect([...el.listeners.keys()].sort()).toEqual(["click", "pointerleave", "pointermove"]);
+  expect([...el.listeners.keys()].sort()).toEqual(ALL_LISTENERS);
   canvas.destroy();
   for (const set of el.listeners.values()) expect(set.size).toBe(0);
   expect(el.removed).toBe(true);
@@ -632,8 +635,8 @@ test("destroy closes an open field and removes every listener it attached", asyn
   expect(field.removed).toBe(true);
   for (const set of stub.window.listeners.values()) expect(set.size).toBe(0);
   for (const set of el.listeners.values()) expect(set.size).toBe(0);
-  // The canvas element itself still carries only the three it always did.
-  expect([...el.listeners.keys()].sort()).toEqual(["click", "pointerleave", "pointermove"]);
+  // The canvas element itself still carries only the listeners it attached.
+  expect([...el.listeners.keys()].sort()).toEqual(ALL_LISTENERS);
 });
 
 // ---------------------------------------------------------------------------
@@ -780,7 +783,7 @@ test("setTheme swaps the theme the skins receive, on the same canvas, keeping th
   // Same element, same listeners: nothing was destroyed.
   expect(stub.created).toHaveLength(1);
   expect(el.removed).toBe(false);
-  expect([...el.listeners.keys()].sort()).toEqual(["click", "pointerleave", "pointermove"]);
+  expect([...el.listeners.keys()].sort()).toEqual(ALL_LISTENERS);
   // …and the value the reader typed is still there, on the canvas and in the circuit.
   expect(canvas.getInputValue(pc.id)).toEqual({ value: 0xan, defined: 0xfn, width: 4 });
   expect(rt.readValue(pc.id)).toEqual({ value: 0xan, defined: 0xfn, width: 4 });
