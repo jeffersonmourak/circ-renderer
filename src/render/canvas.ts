@@ -263,7 +263,12 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     this.canvas.style.height = `${h}px`;
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
-    this.ctx.setTransform(dpr, 0, 0, dpr, pad, pad);
+    // The translation of a transform is in DEVICE pixels: the padding is
+    // asked for in CSS pixels, so it scales with the ratio like everything
+    // else. Before, a 2x display got half the padding on the top and left,
+    // and `componentAtEvent` and `boxOf`, which assume the full padding in
+    // CSS pixels, were off by the other half.
+    this.ctx.setTransform(dpr, 0, 0, dpr, pad * dpr, pad * dpr);
   }
 
   /** Pull every component's current state from the WASM runtime. */

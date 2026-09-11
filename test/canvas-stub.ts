@@ -192,6 +192,8 @@ export function makeStubElement(tag: string): StubElement {
 export interface StubWindow {
   innerWidth: number;
   innerHeight: number;
+  /** Set by a test to stand in for a high-density display; 1 by default. */
+  devicePixelRatio?: number;
   listeners: Map<string, Set<(e: unknown) => void>>;
   addEventListener(type: string, fn: (e: unknown) => void, opts?: unknown): void;
   removeEventListener(type: string, fn: (e: unknown) => void, opts?: unknown): void;
