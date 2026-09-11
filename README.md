@@ -206,9 +206,21 @@ wire: ({ ctx, cell, wire, value, theme }) => {
   ctx.strokeStyle = theme.colors[wireColorKey(wireStyleOf(value))];
   ctx.lineWidth = wireStyleOf(value) === "bus" ? 5 : 3;
   ctx.beginPath();
-  traceWire(ctx, wire, cell);          // third argument: arc radius, 0.4 cells by default
+  traceWire(ctx, wire, cell);          // hard corners, hops of 0.4 cells
   ctx.stroke();
 }
+```
+
+The fourth argument is the hop radius alone, as a number, or a `TraceOptions`
+object: `{ arcRadius, cornerRadius }`. With a `cornerRadius` the wire is one
+continuous subpath whose corners round through `arcTo` and whose hops are
+spliced into the runs as it goes, so a wire with a crossing keeps the same
+corners as one without; the radius is clamped at each corner to half the
+shorter adjacent run. `wirePath(wire, cell, opts)` returns the same trace as
+a `Path2D`.
+
+```ts
+traceWire(ctx, wire, cell, { arcRadius: cell * 0.4, cornerRadius: cell * 0.6 });
 ```
 
 The path is the route only. The stubs from a source box into its `out` port
