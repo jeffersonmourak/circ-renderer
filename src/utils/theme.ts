@@ -1,5 +1,6 @@
 import { type BitValue, type ComponentKind, type Signal, signalOf, widthMask } from "../wasm/topology";
 import type { PlacedComponent, RoutedWire } from "../layout/types";
+import type { Size, View } from "../render/view";
 
 export type ThemeColorKey =
   | "background"
@@ -102,8 +103,19 @@ export interface BackgroundContext<C extends string = ThemeColorKey> {
   ctx: CanvasRenderingContext2D;
   theme: CircTheme<C>;
   cell: number;
+  /** The grid's extent, in cells. */
   width: number;
   height: number;
+  /**
+   * Where the grid sits in the element, and the element's size in CSS
+   * pixels. The context is already transformed by the view, so a theme that
+   * fills the grid can keep drawing in cells; one that wants to fill the whole
+   * element under a zoom has what it needs to find its edges in world pixels:
+   * `-view.x / view.scale` is the left edge, `viewport.width / view.scale`
+   * the width.
+   */
+  view: View;
+  viewport: Size;
 }
 
 export interface PortMarkerContext<C extends string = ThemeColorKey> {

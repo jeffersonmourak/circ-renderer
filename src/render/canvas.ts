@@ -12,6 +12,16 @@ import {
 import { pickSkin } from "./skins";
 import { entryLength, formatPinValue, parsePinValue, type ValueFormat } from "./pin-value";
 import { defaultArcRadius, traceWire } from "./wire-path";
+import {
+  DEFAULT_ZOOM,
+  type Size,
+  type View,
+  clampScale,
+  fitView,
+  sameView,
+  visibleWorld,
+  zoomAbout,
+} from "./view";
 
 /**
  * What a host receives when a reader clicks a multi-bit pin and the host has
@@ -104,6 +114,17 @@ export interface RenderOptions<C extends string = ThemeColorKey> {
    * `getLayout()` rather than through the topology.
    */
   onHover?: (id: number | null) => void;
+  /**
+   * Called after the view changed: a zoom, a pan, a `fit`, a reset. Fires
+   * only on a change and never for the view a canvas is built with, so a host
+   * can keep its zoom label or its saved view in step without a debounce.
+   * Nothing about the simulation is reported here; a view change drives no
+   * pin and fires no pin callback.
+   */
+  onViewChange?: (view: View) => void;
+  /** The zoom range `setView` and `zoomBy` keep to. Default 0.25 and 8. */
+  minZoom?: number;
+  maxZoom?: number;
 }
 
 const DEFAULTS = { cell: 12, padding: 4 };
@@ -124,6 +145,12 @@ export class CircCanvas<C extends string = ThemeColorKey> {
    *  pointer bookkeeping can never clobber it. */
   private highlightId: number | null = null;
   private listeners: Array<() => void> = [];
+  /**
+   * Where the circuit sits in the element; see `View`. The one place the
+   * placement is kept: the transform, the hit-test and `boxOf` each read it,
+   * so a zoom cannot move the picture without moving where a click lands.
+   */
+  private view: View = { scale: 1, x: 0, y: 0 };
 
   /** Per-wire value (snapshot of source's output). Recomputed on refresh. */
   private wireValue = new Map<number, BitValue>();
@@ -152,6 +179,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("CircCanvas: 2d context unavailable");
     this.ctx = ctx;
+    this.view = this.defaultView();
     this.resize();
     this.computeWireTiers();
     for (const w of this.layout.wires) {
@@ -209,6 +237,11 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     return (this.options.theme as CircTheme<string> | undefined) ?? (baseTheme as CircTheme<string>);
   }
   private get valueFormat(): ValueFormat { return this.options.valueFormat ?? "hex"; }
+  private get minZoom(): number { return this.options.minZoom ?? DEFAULT_ZOOM.min; }
+  private get maxZoom(): number { return this.options.maxZoom ?? DEFAULT_ZOOM.max; }
+  private get dpr(): number {
+    return (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+  }
 
   // ---- changing the look of a live canvas -----------------------------------
   //
@@ -225,18 +258,142 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     this.draw();
   }
 
-  /** Change the pixel size of a layout cell. The element resizes to match. */
+  /** Change the pixel size of a layout cell. The element resizes to match,
+   *  and the view goes back to the default: a pan is measured in pixels of
+   *  the old cell, and means nothing in the new one. */
   setCell(cell: number): void {
     this.options = { ...this.options, cell };
-    this.resize();
-    this.draw();
+    this.relayout();
   }
 
-  /** Change the padding around the grid. The element resizes to match. */
+  /** Change the padding around the grid. The element resizes to match, and
+   *  the view goes back to the default, which the padding is part of. */
   setPadding(padding: number): void {
     this.options = { ...this.options, padding };
+    this.relayout();
+  }
+
+  /** Resize the element for new metrics and start again from the default
+   *  view, drawing exactly once either way. */
+  private relayout(): void {
     this.resize();
+    if (!this.changeView(this.defaultView())) this.draw();
+  }
+
+  // ---- the view: zoom and pan -----------------------------------------------
+  //
+  // A view is where the circuit sits in the element (`View`). Every method
+  // below ends in `changeView`, the one funnel: it clamps the scale, ignores
+  // a view equal to the current one, closes an open value field (the pin it
+  // sat under has moved), re-applies the transform, redraws and tells the
+  // host. None of them touch the runtime, drive a pin or fire a pin callback:
+  // moving the picture is not a change to the circuit.
+
+  /** The placement the canvas is built with: the grid one padding in, at its
+   *  natural size. What `resetView` and `fit` at natural size return to. */
+  private defaultView(): View {
+    const pad = this.padding;
+    return { scale: 1, x: pad, y: pad };
+  }
+
+  /** The current view, as a copy: changing it changes nothing. */
+  getView(): View {
+    return { ...this.view };
+  }
+
+  /**
+   * Place the circuit. `scale` is clamped to `minZoom`..`maxZoom`; `x` and
+   * `y` are the element point, in CSS pixels at the element's drawn size, that
+   * the grid's top-left corner lands on. A view equal to the current one is a
+   * no-op: nothing redraws and `onViewChange` stays silent.
+   */
+  setView(view: View): void {
+    this.changeView(view);
+  }
+
+  /** Back to the default view. */
+  resetView(): void {
+    this.changeView(this.defaultView());
+  }
+
+  /**
+   * Zoom by a factor (2 doubles, 0.5 halves) about a point in the element, in
+   * CSS pixels relative to its rendered rect — the space `boxOf` reports in,
+   * and what `clientX - rect.left` gives. The world point under `about` stays
+   * where it is. Without `about`, the element's centre.
+   */
+  zoomBy(factor: number, about?: { x: number; y: number }): void {
+    const ext = this.extent();
+    let px = ext.width / 2;
+    let py = ext.height / 2;
+    if (about) {
+      const p = this.intendedPoint(about.x, about.y);
+      px = p.x;
+      py = p.y;
+    }
+    this.changeView(zoomAbout(this.view, factor, px, py, this.minZoom, this.maxZoom));
+  }
+
+  /** Show the whole grid, centred, with the padding kept clear on every side.
+   *  At the element's natural size this is the default view. */
+  fit(): void {
+    const { cell, layout } = this;
+    const grid = { width: layout.width * cell, height: layout.height * cell };
+    this.changeView(fitView(grid, this.extent(), this.padding, this.minZoom, this.maxZoom));
+  }
+
+  /** Apply a view if it differs from the current one. True when it did. */
+  private changeView(view: View): boolean {
+    const next: View = { scale: clampScale(view.scale, this.minZoom, this.maxZoom), x: view.x, y: view.y };
+    if (sameView(next, this.view)) return false;
+    this.view = next;
+    // The field sat under a pin that has now moved; closing it is the same
+    // rule it already follows for a scroll or a resize.
+    this.closeEditor();
+    this.applyView();
     this.draw();
+    this.options.onViewChange?.(this.getView());
+    return true;
+  }
+
+  /** The element's drawn size in CSS pixels: the grid plus its padding. */
+  private extent(): Size {
+    const { cell, padding, layout } = this;
+    return { width: layout.width * cell + padding * 2, height: layout.height * cell + padding * 2 };
+  }
+
+  /**
+   * Write the view into the context's transform. The scale is the view's
+   * times the device pixel ratio; the translation is in DEVICE pixels, so the
+   * view's offset — which is in CSS pixels, like the padding it defaults to —
+   * is scaled by the ratio too.
+   */
+  private applyView(): void {
+    const { dpr } = this;
+    const { scale, x, y } = this.view;
+    this.ctx.setTransform(dpr * scale, 0, 0, dpr * scale, x * dpr, y * dpr);
+  }
+
+  /**
+   * A point in the element's rendered rect, in CSS pixels, mapped to the
+   * element's drawn size. The renderer sizes the element in CSS pixels, but
+   * page CSS (`max-width: 100%`) can shrink the rendered rect; the transform
+   * and the view live in the drawn size, so everything the pointer says is
+   * mapped there first.
+   */
+  private intendedPoint(ex: number, ey: number): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const ext = this.extent();
+    const sx = rect.width > 0 ? ext.width / rect.width : 1;
+    const sy = rect.height > 0 ? ext.height / rect.height : 1;
+    return { x: ex * sx, y: ey * sy };
+  }
+
+  /** A point in the element's drawn size, in CSS pixels, mapped to world
+   *  pixels: the inverse of the view. */
+  private toWorld(px: number, py: number): { x: number; y: number } {
+    const { scale, x, y } = this.view;
+    return { x: (px - x) / scale, y: (py - y) / scale };
   }
 
   /** Change the base the bus badges are written in and a bare typed value is
@@ -254,21 +411,15 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
   /** Resize canvas to match the grid extents at the current cell size. */
   resize(): void {
-    const cell = this.cell;
-    const pad = this.padding;
-    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
-    const w = this.layout.width * cell + pad * 2;
-    const h = this.layout.height * cell + pad * 2;
+    const { dpr } = this;
+    const { width: w, height: h } = this.extent();
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
-    // The translation of a transform is in DEVICE pixels: the padding is
-    // asked for in CSS pixels, so it scales with the ratio like everything
-    // else. Before, a 2x display got half the padding on the top and left,
-    // and `componentAtEvent` and `boxOf`, which assume the full padding in
-    // CSS pixels, were off by the other half.
-    this.ctx.setTransform(dpr, 0, 0, dpr, pad * dpr, pad * dpr);
+    // Sizing the backing store resets the context; the view has to be
+    // written back.
+    this.applyView();
   }
 
   /** Pull every component's current state from the WASM runtime. */
@@ -401,17 +552,17 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   boxOf(id: number): { x: number; y: number; width: number; height: number } | null {
     const c = this.layout.components.find((p) => p.id === id);
     if (!c) return null;
-    const { cell, padding } = this;
+    const { cell } = this;
+    const { scale, x, y } = this.view;
     const rect = this.canvas.getBoundingClientRect();
-    const intendedW = this.layout.width * cell + padding * 2;
-    const intendedH = this.layout.height * cell + padding * 2;
-    const sx = rect.width > 0 ? rect.width / intendedW : 1;
-    const sy = rect.height > 0 ? rect.height / intendedH : 1;
+    const ext = this.extent();
+    const sx = rect.width > 0 ? rect.width / ext.width : 1;
+    const sy = rect.height > 0 ? rect.height / ext.height : 1;
     return {
-      x: (c.x * cell + padding) * sx,
-      y: (c.y * cell + padding) * sy,
-      width: c.width * cell * sx,
-      height: c.height * cell * sy,
+      x: (c.x * cell * scale + x) * sx,
+      y: (c.y * cell * scale + y) * sy,
+      width: c.width * cell * scale * sx,
+      height: c.height * cell * scale * sy,
     };
   }
 
@@ -714,18 +865,12 @@ export class CircCanvas<C extends string = ThemeColorKey> {
   /** Hit-test using cell-aligned bounding boxes. */
   private componentAtEvent(e: MouseEvent): number | null {
     const rect = this.canvas.getBoundingClientRect();
-    // The renderer set canvas.style.{width,height} = layout-extent * cell + pad*2,
-    // but page CSS (e.g. max-width: 100%) can shrink the rendered rect. Scale the
-    // pointer coords back into intended-pixel space so they align with the layout
-    // grid that was drawn into the canvas's transform.
-    const intendedW = this.layout.width * this.cell + this.padding * 2;
-    const intendedH = this.layout.height * this.cell + this.padding * 2;
-    const scaleX = rect.width > 0 ? intendedW / rect.width : 1;
-    const scaleY = rect.height > 0 ? intendedH / rect.height : 1;
-    const px = (e.clientX - rect.left) * scaleX - this.padding;
-    const py = (e.clientY - rect.top) * scaleY - this.padding;
-    const cx = px / this.cell;
-    const cy = py / this.cell;
+    // Client → the element's drawn size → world, through the same view the
+    // transform drew with, so what is under the pointer is what it hits.
+    const p = this.intendedPoint(e.clientX - rect.left, e.clientY - rect.top);
+    const w = this.toWorld(p.x, p.y);
+    const cx = w.x / this.cell;
+    const cy = w.y / this.cell;
     for (const c of this.layout.components) {
       if (cx >= c.x && cx < c.x + c.width && cy >= c.y && cy < c.y + c.height) {
         return c.id;
@@ -736,22 +881,26 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
   private draw(): void {
     const { ctx, theme, cell, layout } = this;
-    const { padding } = this;
     // Clear in physical (untransformed) pixels.
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.restore();
 
-    // Background.
+    // Background. The default fills what the element SHOWS, not the grid:
+    // zoomed out, the grid is smaller than the element, and a fill of the grid
+    // alone would leave the page showing round it.
+    const viewport = this.extent();
     if (theme.background) {
       theme.background({
         ctx, theme: theme as CircTheme<string>, cell,
         width: layout.width, height: layout.height,
+        view: this.getView(), viewport,
       });
     } else {
+      const shown = visibleWorld(this.view, viewport);
       ctx.fillStyle = theme.colors["background"] ?? "#fff";
-      ctx.fillRect(-padding, -padding, layout.width * cell + padding * 2, layout.height * cell + padding * 2);
+      ctx.fillRect(shown.x, shown.y, shown.width, shown.height);
     }
 
     // Index components by id once per draw.
