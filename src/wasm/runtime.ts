@@ -55,6 +55,13 @@ export interface RuntimeExports {
   setMemWord?: (id: number, addr: number, value: bigint, defined: bigint) => number;
   getMemValue?: (id: number, addr: number) => bigint;
   getMemDefined?: (id: number, addr: number) => bigint;
+  /**
+   * Settle-budget status: `-1` before init, `0` usable, `1` the settle work
+   * budget was exhausted. Absent on artifacts built before bounded settling,
+   * so every call site must feature-detect. See circ-compiler's
+   * DOCS/wasm-api.md.
+   */
+  getSimulationStatus?: () => number;
   // Optional / future:
   reset?: () => void;
   deinit?: () => void;
@@ -264,13 +271,17 @@ export class CircRuntime {
     const mask = widthMask(width);
     const v = value & mask;
     const d = defined & mask;
-    this.localPinStates.set(componentId, { value: v, defined: d, width });
     if (this.abi === "v2") {
       this.exports.setPin(componentId, v, d);
     } else {
       // v1 scalar ABI: collapse to a tri-state (width-1 only).
       this.exports.setPin(componentId, signalOf({ value: v, defined: d, width }));
     }
+    // Mirrored only after the boundary call returns. `setPin` settles the
+    // circuit and traps when the settle budget is exhausted, so recording
+    // first would leave a value the engine never accepted — and `readValue`
+    // would then report that phantom as settled state.
+    this.localPinStates.set(componentId, { value: v, defined: d, width });
   }
 
   /**
@@ -288,7 +299,11 @@ export class CircRuntime {
    * Read the current settled value of a component as a width-aware
    * `BitValue`. Pairs the two boundary getters with the component's width.
    * Falls back to the JS-mirrored input-pin value if the runtime reports a
-   * driven pin as fully undefined (defensive).
+   * driven pin as fully undefined (defensive). The fallback is suppressed
+   * once the settle budget is exhausted: a failed runtime masks every read
+   * as undefined on purpose, and substituting the last driven value there
+   * would paint a pin as settled while the rest of the circuit reads
+   * undefined.
    */
   readValue(componentId: number): BitValue {
     const width = this.widthOf(componentId);
@@ -303,11 +318,28 @@ export class CircRuntime {
       const s = this.exports.getOutputState!(componentId);
       bv = s === 2 ? { value: 0n, defined: 0n, width } : { value: BigInt(s & 1), defined: 1n, width };
     }
-    if (bv.defined === 0n) {
+    if (bv.defined === 0n && !this.settleFailed()) {
       const fallback = this.localPinStates.get(componentId);
       if (fallback) return fallback;
     }
     return bv;
+  }
+
+  /**
+   * The runtime's settle-budget status: `-1` before init, `0` usable, `1` the
+   * settle work budget was exhausted and this runtime is finished — every
+   * value read from it is a placeholder, and further drives trap.
+   *
+   * Artifacts built before bounded settling carry no status export and are
+   * reported `0`: their behaviour is unknown, not known-failed.
+   */
+  simulationStatus(): number {
+    return this.exports.getSimulationStatus?.() ?? 0;
+  }
+
+  /** Whether the runtime exhausted its settle work budget. */
+  private settleFailed(): boolean {
+    return this.simulationStatus() === 1;
   }
 
   /** Collapsed single-bit view of a component's value (for coloring). */

@@ -269,3 +269,49 @@ test("loadMemImage takes its byte view AFTER memBuffer, which may grow memory", 
   // existed before the call.
   expect(Array.from(new Uint8Array(buffer, 16, 4))).toEqual([1, 2, 3, 4]);
 });
+
+// ---- bounded settling (circ-compiler >= 0.0.3) -------------------------------
+// `gated_oscillator.wasm` is `and gate(a = enable, b = inv.out)` closed by
+// `not inv(in = gate.out)`: a genuine oscillator. Booting every pin LOW holds
+// the gate, so it settles; driving `enable` HIGH cannot settle, and the engine
+// spends its work budget and traps. See circ-compiler's DOCS/simulation-engine.md.
+
+test("a non-settling drive leaves the status export reporting failure", async () => {
+  const rt = await load("gated_oscillator.wasm");
+  const enable = idOf(rt, "enable");
+  // Boot-low settled, so the artifact is usable before the drive.
+  expect(rt.simulationStatus()).toBe(0);
+
+  expect(() => rt.setPinAndRun(enable, 1)).toThrow();
+  expect(rt.simulationStatus()).toBe(1);
+});
+
+test("a failed settle never reports a driven pin as settled", async () => {
+  // Regression: `setValue` used to mirror the pin before crossing the
+  // boundary, and `readValue`'s undefined-fallback then served that mirror
+  // back — painting `enable` HIGH while every downstream node read undefined.
+  const rt = await load("gated_oscillator.wasm");
+  const enable = idOf(rt, "enable");
+  try { rt.setPinAndRun(enable, 1); } catch { /* expected trap */ }
+
+  for (const c of rt.topology.components) {
+    expect(rt.readValue(c.id).defined).toBe(0n);
+  }
+});
+
+test("a usable runtime still reads a driven pin back unchanged", async () => {
+  // The fallback is suppressed only on a failed runtime; a healthy one reads
+  // back every drive exactly as before.
+  const rt = await load("slice_then_concat.wasm");
+  const a = idOf(rt, "a");
+  rt.setValueAndRun(a, 0xan, 0xfn);
+  expect(rt.simulationStatus()).toBe(0);
+  expect(rt.readValue(a)).toEqual({ value: 0xan, defined: 0xfn, width: 4 });
+});
+
+test("simulationStatus reports 0 on an artifact with no status export", async () => {
+  // Pre-settling artifacts have nothing to ask, so they are reported usable
+  // rather than failed.
+  const rt = await load("and_v01.wasm");
+  expect(rt.simulationStatus()).toBe(0);
+});
