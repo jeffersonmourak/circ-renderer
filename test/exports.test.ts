@@ -37,4 +37,15 @@ describe("package exports", () => {
     expect(sub.ComponentKind.Ram).toBe(9);
     expect(typeof sub.decodeFullTopology).toBe("function");
   });
+
+  test("the settle-failure contract is reachable from the package root", async () => {
+    // A host cannot tell an exhausted settle budget from a genuine artifact
+    // bug unless it can name the error, so this has to be a public export and
+    // not just a shape the runtime happens to throw.
+    const root = await import("circ-renderer");
+    expect(typeof root.NoSettleError).toBe("function");
+    expect(new root.NoSettleError()).toBeInstanceOf(Error);
+    expect(new root.NoSettleError().name).toBe("NoSettleError");
+    expect(root.NO_SETTLE_MESSAGE).toBe("settle work budget exceeded; reset required");
+  });
 });

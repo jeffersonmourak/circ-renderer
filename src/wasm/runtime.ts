@@ -9,6 +9,27 @@ import {
   widthMask,
 } from "./topology";
 
+/** The `--sim` protocol's wording for an exhausted settle, reused verbatim so
+ *  a host can show one message whichever face reported it. */
+export const NO_SETTLE_MESSAGE = "settle work budget exceeded; reset required";
+
+/**
+ * A drive or memory mutation could not settle within the engine's work
+ * budget. The runtime that threw this is finished: every value read from it
+ * is a placeholder and every further mutation throws again, until the host
+ * builds a fresh runtime from the same bytes.
+ *
+ * This is the typed form of the WASM trap the artifact raises. Without it a
+ * settle failure is a bare `WebAssembly.RuntimeError` ("unreachable"),
+ * indistinguishable from a genuine bug in the artifact.
+ */
+export class NoSettleError extends Error {
+  constructor() {
+    super(`E_NOSETTLE: ${NO_SETTLE_MESSAGE}`);
+    this.name = "NoSettleError";
+  }
+}
+
 /**
  * Exports of a per-circuit `.wasm` artifact emitted by `circ-compiler`
  * (see `templates/main.zig`). The host stages the topology blob into
@@ -251,9 +272,10 @@ export class CircRuntime {
     return this._topology;
   }
 
-  /** Drain the event queue until the circuit settles. */
+  /** Drain the event queue until the circuit settles.
+   *  @throws {NoSettleError} if the circuit cannot settle within the budget. */
   run(): void {
-    this.exports.run();
+    this.settling(() => this.exports.run());
   }
 
   /** Cold-start: every component's state returns to undefined. */
@@ -271,12 +293,14 @@ export class CircRuntime {
     const mask = widthMask(width);
     const v = value & mask;
     const d = defined & mask;
-    if (this.abi === "v2") {
-      this.exports.setPin(componentId, v, d);
-    } else {
-      // v1 scalar ABI: collapse to a tri-state (width-1 only).
-      this.exports.setPin(componentId, signalOf({ value: v, defined: d, width }));
-    }
+    this.settling(() => {
+      if (this.abi === "v2") {
+        this.exports.setPin(componentId, v, d);
+      } else {
+        // v1 scalar ABI: collapse to a tri-state (width-1 only).
+        this.exports.setPin(componentId, signalOf({ value: v, defined: d, width }));
+      }
+    });
     // Mirrored only after the boundary call returns. `setPin` settles the
     // circuit and traps when the settle budget is exhausted, so recording
     // first would leave a value the engine never accepted — and `readValue`
@@ -340,6 +364,26 @@ export class CircRuntime {
   /** Whether the runtime exhausted its settle work budget. */
   private settleFailed(): boolean {
     return this.simulationStatus() === 1;
+  }
+
+  /**
+   * Run one boundary call that may exhaust the settle budget, reporting that
+   * exhaustion as a `NoSettleError` instead of a bare WASM trap.
+   *
+   * Checked on both sides: before, because a runtime that already failed
+   * refuses every mutation and would otherwise trap again with no context;
+   * after, because the trap itself carries nothing identifying, and the
+   * status export is the only way to tell it from an unrelated one. Anything
+   * the status does not claim is rethrown untouched.
+   */
+  private settling<T>(call: () => T): T {
+    if (this.settleFailed()) throw new NoSettleError();
+    try {
+      return call();
+    } catch (error) {
+      if (this.settleFailed()) throw new NoSettleError();
+      throw error;
+    }
   }
 
   /** Collapsed single-bit view of a component's value (for coloring). */
@@ -467,7 +511,9 @@ export class CircRuntime {
     if (!this.hasMemory || !this.exports.setMemWord) return MEM_ABSENT;
     const info = this.memInfo(id);
     const mask = info ? widthMask(info.width) : widthMask(64);
-    return this.exports.setMemWord(id, addr, value & mask, defined & mask);
+    return this.settling(() =>
+      this.exports.setMemWord!(id, addr, value & mask, defined & mask)
+    );
   }
 
   /**
@@ -485,7 +531,7 @@ export class CircRuntime {
     // The view is taken here, after memBuffer, which may have grown memory;
     // one taken earlier would be detached and the copy would land nowhere.
     new Uint8Array(e.memory.buffer).set(bytes, ptr);
-    return e.memLoad(id, bytes.length);
+    return this.settling(() => e.memLoad!(id, bytes.length));
   }
 
   /** The memory's contents as an image in the same layout `loadMemImage`
@@ -504,7 +550,7 @@ export class CircRuntime {
   /** Every word becomes unknown. */
   clearMem(id: number): MemStatus {
     if (!this.hasMemory || !this.exports.memClear) return MEM_ABSENT;
-    return this.exports.memClear(id);
+    return this.settling(() => this.exports.memClear!(id));
   }
 
   /** Escape hatch for callers that need direct access to the WASM exports. */

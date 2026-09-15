@@ -184,6 +184,32 @@ existed — check `runtime.hasMemory` first to avoid that case. A mutator
 re-presents the memory's `out` at once, so `view.refreshState()` is enough
 afterwards; no `run()` is needed. A ram loads exactly as a rom does.
 
+### When a circuit will not settle
+
+Gate feedback is legal — that is how a latch is built — but it does not
+guarantee that every drive settles. The engine bounds each settle with a work
+budget; a circuit that exhausts it (a genuine oscillator) leaves the runtime
+finished rather than hanging the page.
+
+```ts
+import { NoSettleError } from "circ-renderer";
+
+try {
+  runtime.setPinAndRun(enable.id, 1);
+} catch (error) {
+  if (!(error instanceof NoSettleError)) throw error;
+  // This runtime is spent. Reads still answer — every value now reads
+  // undefined — so the canvas can repaint and say so. To carry on, build a
+  // fresh runtime from the same bytes.
+}
+```
+
+Every mutation (`setValue`, `setPinSignal`, `run`, and the memory mutators)
+throws `NoSettleError` once the budget is gone, including every later call.
+Reads (`readValue`, `snapshot`, `readMemWord`) never throw. `simulationStatus()`
+reports it directly: `0` usable, `1` exhausted. Artifacts built before bounded
+settling carry no status export and report `0`.
+
 `buildLayout` is a pure function — useful if you want to skip Canvas and render the layout to SVG, React, or anything else. It runs the same five-stage pipeline (collapse → columns → rows → place → route) that the Zig CLI's `--preview` uses, ported to TypeScript.
 
 ## Theming

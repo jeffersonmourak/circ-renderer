@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CircRuntime } from "../src/wasm/runtime";
+import { CircRuntime, NoSettleError } from "../src/wasm/runtime";
 
 const FIX = join(import.meta.dir, "fixtures");
 const load = (name: string) =>
@@ -276,14 +276,48 @@ test("loadMemImage takes its byte view AFTER memBuffer, which may grow memory", 
 // the gate, so it settles; driving `enable` HIGH cannot settle, and the engine
 // spends its work budget and traps. See circ-compiler's DOCS/simulation-engine.md.
 
-test("a non-settling drive leaves the status export reporting failure", async () => {
+test("a non-settling drive throws NoSettleError, not a bare WASM trap", async () => {
   const rt = await load("gated_oscillator.wasm");
   const enable = idOf(rt, "enable");
   // Boot-low settled, so the artifact is usable before the drive.
   expect(rt.simulationStatus()).toBe(0);
 
-  expect(() => rt.setPinAndRun(enable, 1)).toThrow();
+  expect(() => rt.setPinAndRun(enable, 1)).toThrow(NoSettleError);
   expect(rt.simulationStatus()).toBe(1);
+});
+
+test("a failed runtime refuses every later mutation with the same error", async () => {
+  const rt = await load("gated_oscillator.wasm");
+  const enable = idOf(rt, "enable");
+  expect(() => rt.setPinAndRun(enable, 1)).toThrow(NoSettleError);
+
+  // Driving back to the value that settled before does not revive it: the
+  // engine is poisoned until the host builds a fresh runtime.
+  expect(() => rt.run()).toThrow(NoSettleError);
+  expect(() => rt.setPinSignal(enable, 0)).toThrow(NoSettleError);
+  expect(() => rt.setValue(enable, 0n, 1n)).toThrow(NoSettleError);
+});
+
+test("reads stay readable after a failed settle", async () => {
+  // Mutations throw; reads return placeholders, so a host can still paint the
+  // circuit and say what happened instead of tearing the view down.
+  const rt = await load("gated_oscillator.wasm");
+  const enable = idOf(rt, "enable");
+  expect(() => rt.setPinAndRun(enable, 1)).toThrow(NoSettleError);
+
+  expect(() => rt.readValue(enable)).not.toThrow();
+  expect(() => rt.snapshot()).not.toThrow();
+  expect(rt.getOutputState(enable)).toBe(2 /* Undefined */);
+});
+
+test("a fresh runtime over the same bytes starts usable again", async () => {
+  const bytes = new Uint8Array(readFileSync(join(FIX, "gated_oscillator.wasm")));
+  const failed = await CircRuntime.loadFromBytes(bytes);
+  expect(() => failed.setPinAndRun(idOf(failed, "enable"), 1)).toThrow(NoSettleError);
+
+  const fresh = await CircRuntime.loadFromBytes(bytes);
+  expect(fresh.simulationStatus()).toBe(0);
+  expect(() => fresh.run()).not.toThrow();
 });
 
 test("a failed settle never reports a driven pin as settled", async () => {
@@ -314,4 +348,44 @@ test("simulationStatus reports 0 on an artifact with no status export", async ()
   // rather than failed.
   const rt = await load("and_v01.wasm");
   expect(rt.simulationStatus()).toBe(0);
+});
+
+test("a failed runtime refuses every memory mutation and still answers reads", () => {
+  // No shipped memory fixture oscillates, so the failure is staged: a fake
+  // instance whose status export reports an exhausted budget, with memory
+  // exports that would happily report success if they were ever reached.
+  const calls: string[] = [];
+  const exports = {
+    memory: { buffer: new ArrayBuffer(64) },
+    topology_alloc: () => 0,
+    init: () => {},
+    run: () => {},
+    setPin: () => {},
+    getOutputValue: () => 0n,
+    getOutputDefined: () => 0n,
+    getSimulationStatus: () => 1,
+    getMemInfo: (id: number) => (id === 7 ? (8 << 16) | (8 << 8) | 4 : -1),
+    memBuffer: () => 16,
+    memLoad: () => { calls.push("memLoad"); return 0; },
+    memStore: () => 0,
+    memClear: () => { calls.push("memClear"); return 0; },
+    setMemWord: () => { calls.push("setMemWord"); return 0; },
+    getMemValue: () => 0n,
+    getMemDefined: () => 0n,
+  };
+  const topology = {
+    components: [{ id: 7, kind: 8, name: "code", width: 8, origin: [] }],
+  } as unknown as import("../src/wasm/topology").FullTopology;
+  const rt = new CircRuntime({ exports } as unknown as WebAssembly.Instance, new Uint8Array(), topology);
+
+  expect(rt.simulationStatus()).toBe(1);
+  expect(() => rt.writeMemWord(7, 0, 1n, 1n)).toThrow(NoSettleError);
+  expect(() => rt.loadMemImage(7, new Uint8Array([1, 2]))).toThrow(NoSettleError);
+  expect(() => rt.clearMem(7)).toThrow(NoSettleError);
+  // Refused before the boundary, so a failed runtime is never asked to mutate.
+  expect(calls).toEqual([]);
+
+  // Reads still answer, so the host can paint the failure rather than crash.
+  expect(rt.readMemWord(7, 0)).toEqual({ value: 0n, defined: 0n, width: 8 });
+  expect(rt.memories().map((m) => m.name)).toEqual(["code"]);
 });
