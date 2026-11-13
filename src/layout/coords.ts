@@ -27,9 +27,9 @@ function buildAdj(layered: LayeredGraph, which: "ins" | "outs"): number[][] {
   return lists;
 }
 
-function outputOffset(graph: VirtualGraph, layered: LayeredGraph, h: number[], ni: number): number {
+function outputOffset(graph: VirtualGraph, layered: LayeredGraph, h: number[], ni: number, srcPort: number): number {
   const ln = layered.nodes[ni];
-  return ln.real !== null ? outputRow(graph.nodes[ln.real], h[ni]) : 0;
+  return ln.real !== null ? outputRow(graph.nodes[ln.real], h[ni], srcPort) : 0;
 }
 
 function inputPortRow(graph: VirtualGraph, layered: LayeredGraph, y: number[], ni: number, dstPort: number): number | null {
@@ -43,9 +43,9 @@ function inputPortRow(graph: VirtualGraph, layered: LayeredGraph, y: number[], n
   return y[ni];
 }
 
-function outputPortRow(graph: VirtualGraph, layered: LayeredGraph, y: number[], h: number[], ni: number): number {
+function outputPortRow(graph: VirtualGraph, layered: LayeredGraph, y: number[], h: number[], ni: number, srcPort: number): number {
   const ln = layered.nodes[ni];
-  return ln.real !== null ? y[ni] + outputRow(graph.nodes[ln.real], h[ni]) : y[ni];
+  return ln.real !== null ? y[ni] + outputRow(graph.nodes[ln.real], h[ni], srcPort) : y[ni];
 }
 
 /** The top row that makes the node's highest input wire straight, if any. */
@@ -68,11 +68,12 @@ function preferredRow(graph: VirtualGraph, layered: LayeredGraph, ins: number[][
     }
     if (bestSlot === null) return null;
     const e = layered.edges[bestEdge];
-    const srcRow = outputPortRow(graph, layered, y, h, e.src);
+    const srcRow = outputPortRow(graph, layered, y, h, e.src, e.srcPort);
     const portRow = inputSlots(node)[bestSlot].row;
     return Math.max(0, srcRow - portRow);
   }
-  return outputPortRow(graph, layered, y, h, layered.edges[edges[0]].src);
+  const first = layered.edges[edges[0]];
+  return outputPortRow(graph, layered, y, h, first.src, first.srcPort);
 }
 
 /**
@@ -130,7 +131,7 @@ export function assign(graph: VirtualGraph, layered: LayeredGraph, ordering: Ord
         const e = layered.edges[es[0]];
         const sinkRow = inputPortRow(graph, layered, y, e.dst, e.dstPort);
         if (sinkRow === null) continue;
-        const outOff = outputOffset(graph, layered, h, ni);
+        const outOff = outputOffset(graph, layered, h, ni, e.srcPort);
         if (sinkRow < outOff) continue;
         const target = sinkRow - outOff;
         if (target <= y[ni]) continue;
@@ -220,6 +221,8 @@ export function toPlaced(graph: VirtualGraph, layered: LayeredGraph, coords: Coo
       height: h,
       inPorts: pc.inPorts,
       outPort: pc.outPort,
+      outPorts: pc.outPorts,
+      portLabels: node.portLabels ?? false,
       bitWidth: node.bitWidth,
       slice: node.slice,
       memory: node.memory,

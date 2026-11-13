@@ -48,9 +48,9 @@ function inputRow(graph: VirtualGraph, layered: LayeredGraph, coords: Coords, ni
   return coords.y[ni];
 }
 
-function outRow(graph: VirtualGraph, layered: LayeredGraph, coords: Coords, ni: number): number {
+function outRow(graph: VirtualGraph, layered: LayeredGraph, coords: Coords, ni: number, srcPort: number): number {
   const ln = layered.nodes[ni];
-  return ln.real !== null ? coords.y[ni] + outputRow(graph.nodes[ln.real], coords.h[ni]) : coords.y[ni];
+  return ln.real !== null ? coords.y[ni] + outputRow(graph.nodes[ln.real], coords.h[ni], srcPort) : coords.y[ni];
 }
 
 const lessTerminalByRow = (a: Terminal, b: Terminal): number => (a.row !== b.row ? a.row - b.row : a.node - b.node);
@@ -85,7 +85,7 @@ export function extractNets(graph: VirtualGraph, layered: LayeredGraph, coords: 
     if (sinks.length === 0) continue;
     sinks.sort(lessTerminalByRow);
     const key = keys[i];
-    const srcRow = outRow(graph, layered, coords, key.srcNode);
+    const srcRow = outRow(graph, layered, coords, key.srcNode, key.port);
     let lo = srcRow;
     let hi = srcRow;
     let straight = true;
@@ -320,7 +320,7 @@ function appendReturnLaneNets(graph: VirtualGraph, layered: LayeredGraph, coords
     const lDst = layered.nodes[dstNode].layer;
     if (lDst === 0) throw new Error("channels: a back edge into layer zero");
     const returnRow = coords.height + i;
-    const srcRow = outRow(graph, layered, coords, srcNode);
+    const srcRow = outRow(graph, layered, coords, srcNode, o.srcPort);
     const dstRow = inputRow(graph, layered, coords, dstNode, o.dstPort);
     if (dstRow === null) continue;
     if (lSrc === k) {

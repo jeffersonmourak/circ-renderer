@@ -1,6 +1,6 @@
 import { buildLayout, type LayoutGrid, type LayoutOptions, type PlacedComponent, type RoutedWire } from "../layout";
-import { isPrimitive } from "../layout/types";
-import { type BitValue, ComponentKind, type Signal, portByteOfName, signalOf, undefinedValue, widthMask } from "../wasm/topology";
+import { isPrimitive, type PortCoord } from "../layout/types";
+import { type BitValue, ComponentKind, type Signal, signalOf, undefinedValue, widthMask } from "../wasm/topology";
 import type { CircRuntime } from "../wasm/runtime";
 import {
   baseTheme,
@@ -175,6 +175,12 @@ export interface NavigationOptions {
 const DRAG_THRESHOLD = 4;
 
 const DEFAULTS = { cell: 12, padding: 4 };
+
+/** Where the wires that leave `comp` by `srcPort` start: that output port,
+ * or the component's first when it lists no such port. */
+function outPortOf(comp: PlacedComponent, srcPort: number): PortCoord {
+  return comp.outPorts.find((p) => p.port === srcPort)?.coord ?? comp.outPort;
+}
 
 export class CircCanvas<C extends string = ThemeColorKey> {
   readonly canvas: HTMLCanvasElement;
@@ -1250,7 +1256,15 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       const driver = this.realDriverByComp.get(comp.id) ?? comp.id;
       const outValue = this.signals.get(driver) ?? undefinedValue(comp.bitWidth);
       const inValues = comp.inPorts.map((slot) => {
-        const wireIdx = layout.wires.findIndex((w) => w.dstId === comp.id && portByteOfName(slot.portName) === w.dstPort);
+        const wireIdx = layout.wires.findIndex((w) => w.dstId === comp.id && slot.port === w.dstPort);
+        return wireIdx >= 0 ? this.wireValue.get(wireIdx) ?? undefinedValue(1) : undefinedValue(1);
+      });
+      // One value per output port. A chip's ports each have their own
+      // driver, which the wires leaving them carry; a port nothing reads has
+      // no wire and stays unknown. Anything else has the one output.
+      const outValues = comp.outPorts.map((slot) => {
+        if (isPrimitive(comp.kind)) return outValue;
+        const wireIdx = layout.wires.findIndex((w) => w.srcId === comp.id && slot.port === w.srcPort);
         return wireIdx >= 0 ? this.wireValue.get(wireIdx) ?? undefinedValue(1) : undefinedValue(1);
       });
       const skinArgs = {
@@ -1259,6 +1273,8 @@ export class CircCanvas<C extends string = ThemeColorKey> {
         outputSignal: signalOf(outValue),
         inputValues: inValues,
         outputValue: outValue,
+        outputSignals: outValues.map(signalOf),
+        outputValues: outValues,
         hovered: this.hoverId === comp.id || this.highlightId === comp.id,
       };
       const skin = pickSkin(theme as CircTheme<string>, skinArgs);
@@ -1411,17 +1427,18 @@ export class CircCanvas<C extends string = ThemeColorKey> {
 
       // Source marker — drawn at most once per (component, source).
       const src = compById.get(wire.srcId);
-      const srcKey = `${wire.srcId}`;
-      if (src && !stampedSources.has(srcKey)) {
+      const srcKey = `${wire.srcId}.${wire.srcPort}`;
+      const srcPort = src ? outPortOf(src, wire.srcPort) : null;
+      if (src && srcPort && !stampedSources.has(srcKey)) {
         if (theme.portMarker) {
           theme.portMarker({
             ctx, theme: theme as CircTheme<string>, cell,
-            x: src.outPort.x, y: src.outPort.y,
+            x: srcPort.x, y: srcPort.y,
             signal: sig, side: "source",
           });
         } else {
-          const cx = src.outPort.x * cell + cell / 2;
-          const cy = src.outPort.y * cell + cell / 2;
+          const cx = srcPort.x * cell + cell / 2;
+          const cy = srcPort.y * cell + cell / 2;
           ctx.fillStyle = theme.colors["background"] ?? "#fff";
           ctx.strokeStyle = wireColor;
           ctx.lineWidth = Math.max(1, cell * 0.14);
@@ -1436,7 +1453,7 @@ export class CircCanvas<C extends string = ThemeColorKey> {
       // Destination marker.
       const dst = compById.get(wire.dstId);
       if (!dst) continue;
-      const slot = dst.inPorts.find((p) => portByteOfName(p.portName) === wire.dstPort);
+      const slot = dst.inPorts.find((p) => p.port === wire.dstPort);
       if (!slot) continue;
       if (theme.portMarker) {
         theme.portMarker({
@@ -1480,16 +1497,17 @@ export class CircCanvas<C extends string = ThemeColorKey> {
     // Source-side stub: from the source box's right edge into the out_port.
     const src = compById.get(wire.srcId);
     if (src) {
-      const sy = src.outPort.y * cell + cell / 2;
+      const port = outPortOf(src, wire.srcPort);
+      const sy = port.y * cell + cell / 2;
       ctx.beginPath();
       ctx.moveTo((src.x + src.width - 0.5) * cell, sy);
-      ctx.lineTo(src.outPort.x * cell + cell / 2, sy);
+      ctx.lineTo(port.x * cell + cell / 2, sy);
       ctx.stroke();
     }
     // Destination-side stub: from the in_port into the destination box.
     const dst = compById.get(wire.dstId);
     if (dst) {
-      const slot = dst.inPorts.find((p) => portByteOfName(p.portName) === wire.dstPort);
+      const slot = dst.inPorts.find((p) => p.port === wire.dstPort);
       if (slot) {
         const dy = slot.coord.y * cell + cell / 2;
         ctx.beginPath();

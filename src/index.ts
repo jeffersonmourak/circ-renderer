@@ -75,6 +75,7 @@ export {
   defaultSkins,
   boxOutline,
   drawLabel,
+  drawPortLabels,
   memoryLabel,
   color,
   fill,

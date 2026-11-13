@@ -1,8 +1,8 @@
 and_of_not opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=3/4 C=0 F=0 size=37x7
-builtin_xnor opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 C=0 F=0 size=32x7
 builtin_xnor expanded I0=0 I1=0 I2=0 I3=0 X=2 B=8 S=8/12 C=1 F=0 size=67x13
-builtin_xor opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 C=0 F=0 size=31x7
+builtin_xnor opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 C=0 F=0 size=32x7
 builtin_xor expanded I0=0 I1=0 I2=0 I3=0 X=2 B=8 S=7/11 C=1 F=0 size=57x13
+builtin_xor opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 C=0 F=0 size=31x7
 chain opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=4/4 C=0 F=0 size=47x3
 clean_gated_feedback opaque I0=0 I1=0 I2=0 I3=0 X=0 B=4 S=1/2 C=0 F=0 size=23x4
 demux_1to2 opaque I0=0 I1=0 I2=0 I3=0 X=2 B=6 S=4/7 C=1 F=0 size=41x13
@@ -11,8 +11,8 @@ demux_3bit_1to2 opaque I0=0 I1=0 I2=0 I3=0 X=12 B=24 S=8/19 C=11 F=0 size=42x31
 edge_single_component opaque I0=0 I1=0 I2=0 I3=0 X=0 B=4 S=1/2 C=0 F=0 size=25x8
 fan_in opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 C=0 F=0 size=25x7
 fan_out opaque I0=0 I1=0 I2=0 I3=0 X=0 B=4 S=4/6 C=0 F=0 size=26x11
-full_adder_from_builtins opaque I0=0 I1=0 I2=0 I3=0 X=3 B=16 S=5/12 C=2 F=0 size=64x18
 full_adder_from_builtins expanded I0=0 I1=0 I2=0 I3=0 X=17 B=36 S=15/31 C=13 F=0 size=100x39
+full_adder_from_builtins opaque I0=0 I1=0 I2=0 I3=0 X=3 B=16 S=5/12 C=2 F=0 size=64x18
 led_4bit_default opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=1/1 C=0 F=0 size=20x3
 mixed_width_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=3/3 C=0 F=0 size=44x7
 multi_led opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=3/3 C=0 F=0 size=16x11
@@ -20,6 +20,16 @@ multibit_and_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=2/3 C=0 F=0 size=36x7
 multibit_input_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=2/2 C=0 F=0 size=33x3
 multibit_output_preview opaque I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=2/2 C=0 F=0 size=31x3
 parallel_leftward_detours opaque I0=0 I1=0 I2=0 I3=0 X=2 B=8 S=2/4 C=0 F=0 size=24x9
+project-clean_register_feedback expanded I0=0 I1=0 I2=0 I3=0 X=5 B=22 S=8/17 C=0 F=0 size=88x17
+project-clean_register_feedback opaque I0=0 I1=0 I2=0 I3=0 X=1 B=8 S=2/5 C=0 F=0 size=48x11
+project-full_adder expanded I0=0 I1=0 I2=0 I3=0 X=17 B=36 S=15/31 C=13 F=0 size=100x39
+project-full_adder opaque I0=0 I1=0 I2=0 I3=0 X=2 B=10 S=3/8 C=2 F=0 size=85x11
+project-memory_parametric expanded I0=0 I1=0 I2=0 I3=0 X=2 B=6 S=2/5 C=0 F=0 size=40x15
+project-memory_parametric opaque I0=0 I1=0 I2=0 I3=0 X=2 B=6 S=2/5 C=0 F=0 size=47x15
+project-multi_param_distinct expanded I0=0 I1=0 I2=0 I3=0 X=0 B=0 S=8/8 C=0 F=0 size=37x15
+project-multi_param_distinct opaque I0=0 I1=0 I2=0 I3=0 X=0 B=8 S=4/8 C=0 F=0 size=48x15
+project-same_name_half_adder expanded I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=3/4 C=0 F=0 size=37x7
+project-same_name_half_adder opaque I0=0 I1=0 I2=0 I3=0 X=0 B=2 S=4/5 C=0 F=0 size=61x7
 ram_basic opaque I0=0 I1=0 I2=0 I3=0 X=2 B=6 S=2/5 C=0 F=0 size=43x15
 ram_write_read opaque I0=0 I1=0 I2=0 I3=0 X=2 B=6 S=2/5 C=0 F=0 size=43x15
 regression_led_out_drives_gate opaque I0=0 I1=0 I2=0 I3=0 X=1 B=6 S=2/4 C=0 F=0 size=35x8

@@ -27,6 +27,38 @@ export interface OutputEdge {
   realSrcId: number;
 }
 
+/** One port of a node: its name, the port byte wires address it by, and its
+ * row offset from the box's top edge. */
+export interface Slot {
+  name: string;
+  port: number;
+  row: number;
+}
+
+/**
+ * A collapsed chip's port bytes. A port named like a primitive port keeps
+ * that port's `PortName` byte; any other takes `CHIP_PORT_BASE` plus its
+ * index among the chip's inputs (or outputs), so the two never collide.
+ */
+export const CHIP_PORT_BASE = 16;
+
+/** Height in rows of a chip box with this many inputs and outputs: one port
+ * on every other row, starting under the top border. */
+export function chipHeight(nIn: number, nOut: number): number {
+  const n = Math.max(nIn, nOut);
+  return n <= 1 ? 3 : 2 * n + 1;
+}
+
+/** Inputs take every other row from the top; outputs do the same, centred
+ * on the box, so a lone output sits on the middle row as a gate's does. */
+export function assignChipRows(ins: Slot[], outs: Slot[]): void {
+  const h = chipHeight(ins.length, outs.length);
+  ins.forEach((s, i) => { s.row = 2 * i + 1; });
+  if (outs.length === 0) return;
+  const first = (h - (2 * outs.length - 1)) / 2;
+  outs.forEach((s, j) => { s.row = first + 2 * j; });
+}
+
 export interface VirtualNode {
   id: number;
   kind: NodeKind;
@@ -40,6 +72,14 @@ export interface VirtualNode {
   slice?: { lo: number; hi: number };
   /** Address width for `Rom`/`Ram` nodes, threaded from the topology aux. */
   memory?: { addrWidth: number };
+  /** A collapsed chip's declared inputs and outputs, in declaration order
+   * (stage 1 fills them); absent on a primitive, whose ports are fixed by
+   * its kind (`ports.ts`). */
+  inSlots?: Slot[];
+  outSlots?: Slot[];
+  /** The chip draws its port names inside its box. False for a chip shaped
+   * like a built-in gate (inputs among `a`, `in`, `b`; one output `out`). */
+  portLabels?: boolean;
 }
 
 export interface VirtualGraph {
@@ -65,8 +105,10 @@ export interface PortCoord {
 }
 
 export interface PortSlot {
-  /** Port label as drawn on the box border: "in" | "a" | "b" | "addr" | "din" | "we" | "clk" | "op<N>" (no "out" — out is the single output port). */
+  /** The port's name: a primitive's "in" | "a" | "b" | "out" | "addr" | "din" | "we" | "clk" | "op<N>", or a chip's declared pin name. */
   portName: string;
+  /** The byte a wire's `srcPort` or `dstPort` names this port by. */
+  port: number;
   coord: PortCoord;
 }
 
@@ -81,7 +123,13 @@ export interface PlacedComponent {
   width: number;
   height: number;
   inPorts: PortSlot[];
+  /** The first (for a primitive, the only) output port. */
   outPort: PortCoord;
+  /** Every output port: none for a sink, one per declared output for a
+   * chip, one for anything else. */
+  outPorts: PortSlot[];
+  /** A chip that draws its port names inside its box. */
+  portLabels: boolean;
   /** Bit width of this component's output net (1..64). */
   bitWidth: number;
   /** Bit range for `Slice` components. */

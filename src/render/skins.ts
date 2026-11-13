@@ -72,6 +72,33 @@ export function drawLabel<C extends string>(
   ctx.fillText(text, cx, cy);
 }
 
+/**
+ * A chip's port names, each on its port's row: inputs inside the left
+ * border, outputs inside the right. Draws nothing for a component whose
+ * layout did not ask for labels (`portLabels`), so a skin may call it
+ * unconditionally. The layout sized the box to hold them.
+ */
+export function drawPortLabels<C extends string>(
+  ctx: CanvasRenderingContext2D,
+  theme: CircTheme<C>,
+  cell: number,
+  component: SkinContext<C>["component"]
+) {
+  if (!component.portLabels) return;
+  ctx.fillStyle = labelColor(theme);
+  ctx.font = `${Math.round(cell * 0.8)}px ui-monospace, monospace`;
+  ctx.textBaseline = "middle";
+  const inset = cell * 0.6;
+  ctx.textAlign = "left";
+  for (const p of component.inPorts) {
+    ctx.fillText(p.portName, component.x * cell + inset, p.coord.y * cell + cell / 2);
+  }
+  ctx.textAlign = "right";
+  for (const p of component.outPorts) {
+    ctx.fillText(p.portName, (component.x + component.width) * cell - inset, p.coord.y * cell + cell / 2);
+  }
+}
+
 export { memoryLabel };
 
 export const drawPin: Skin<ThemeColorKey> = ({ ctx, theme, cell, component, outputSignal }) => {
@@ -218,6 +245,7 @@ export const drawSubcircuit: Skin<ThemeColorKey> = ({ ctx, theme, cell, componen
     const label = `${component.kind.subcircuit}:${component.name}`;
     drawLabel(ctx, theme, cell, label, x0 + w / 2, y0 + h / 2);
   }
+  drawPortLabels(ctx, theme, cell, component);
 };
 
 /** Memory box: macro-coloured border, `rom code[8,4]` label, fill by output signal. */

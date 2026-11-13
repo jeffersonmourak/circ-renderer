@@ -33,6 +33,12 @@ export const load = (name: string) =>
 export const golden = (name: string, mode: Mode) =>
   JSON.parse(readFileSync(join(LAYOUTS, `${name}.${mode}.layout.json`), "utf8"));
 
+const projectSlot = (p: { portName: string; port: number; coord: { x: number; y: number } }) => ({
+  portName: p.portName,
+  port: p.port,
+  coord: { x: p.coord.x, y: p.coord.y },
+});
+
 /** Project a `LayoutGrid` onto the contract's field set, in the contract's key order. */
 export function projectLayout(grid: LayoutGrid) {
   return {
@@ -46,11 +52,10 @@ export function projectLayout(grid: LayoutGrid) {
       y: c.y,
       width: c.width,
       height: c.height,
-      inPorts: c.inPorts.map((p) => ({
-        portName: p.portName,
-        coord: { x: p.coord.x, y: p.coord.y },
-      })),
+      inPorts: c.inPorts.map(projectSlot),
       outPort: { x: c.outPort.x, y: c.outPort.y },
+      outPorts: c.outPorts.map(projectSlot),
+      portLabels: c.portLabels,
       bitWidth: c.bitWidth,
     })),
     wires: grid.wires.map((w) => ({

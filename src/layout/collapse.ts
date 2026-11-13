@@ -4,10 +4,13 @@ import {
   PortName,
 } from "../wasm/topology";
 import {
+  CHIP_PORT_BASE,
+  assignChipRows,
   type InputEdge,
   type LayoutOptions,
   type OutputEdge,
   type VirtualGraph,
+  type Slot,
   type VirtualNode,
 } from "./types";
 
@@ -123,6 +126,38 @@ export function collapse(
     virtualIdOf.set(c.id, g !== undefined ? groupVirtualId[g] : c.id);
   }
 
+  // 4b. A collapsed chip's ports: its own pins (origin depth 1), in
+  // declaration order. Each gets a port byte, so two inputs never share a
+  // slot and two outputs never share a pin.
+  const groupIns: Slot[][] = groupKeys.map(() => []);
+  const groupOuts: Slot[][] = groupKeys.map(() => []);
+  const portOfPin = new Map<number, number>();
+  for (const c of topology.components) {
+    const g = groupOfId.get(c.id);
+    if (g === undefined || c.origin.length !== 1) continue;
+    const list =
+      c.kind === ComponentKind.InputPin ? groupIns[g] : c.kind === ComponentKind.OutputPin ? groupOuts[g] : null;
+    if (list === null) continue;
+    const port = chipPortByte(c.name, list.length);
+    portOfPin.set(c.id, port);
+    list.push({ name: c.name, port, row: 0 });
+  }
+  for (let g = 0; g < groupKeys.length; g++) assignChipRows(groupIns[g], groupOuts[g]);
+
+  // A chip's output pin is a tap: whatever reads the output outside the chip
+  // is wired to the pin's driver inside it, not to the pin. So the port a
+  // wire leaves by is the output pin its source drives (the first, when one
+  // signal is exported twice).
+  const outPortOfDriver = new Map<number, number>();
+  for (const conn of topology.connections) {
+    if (kindOf.get(conn.toId) !== ComponentKind.OutputPin) continue;
+    const port = portOfPin.get(conn.toId);
+    if (port === undefined) continue;
+    const driver = isPassthrough(conn.fromId) ? resolvedSource.get(conn.fromId) : conn.fromId;
+    if (driver === undefined || groupOfId.get(driver) !== groupOfId.get(conn.toId)) continue;
+    if (!outPortOfDriver.has(driver)) outPortOfDriver.set(driver, port);
+  }
+
   // 5. Walk connections, accumulate edges per virtual node.
   const nodeInputs = new Map<number, InputEdge[]>();
   const nodeOutputs = new Map<number, OutputEdge[]>();
@@ -151,8 +186,8 @@ export function collapse(
     if (srcVid === undefined || dstVid === undefined) continue;
     if (srcVid === dstVid) continue; // internal to a collapsed group
 
-    const dstPort = remappedPort(conn.port, conn.toId, dstVid, kindOf, nameOf);
-    const srcPort = remappedPort(SRC_PORT_OUT, effectiveSource, srcVid, kindOf, nameOf);
+    const dstPort = portOfPin.get(conn.toId) ?? conn.port;
+    const srcPort = outPortOfDriver.get(effectiveSource) ?? SRC_PORT_OUT;
 
     nodeOutputs.get(srcVid)!.push({
       dstId: dstVid, srcPort, dstPort, realSrcId: effectiveSource,
@@ -189,6 +224,9 @@ export function collapse(
       inputs: nodeInputs.get(vid)!,
       outputs: nodeOutputs.get(vid)!,
       bitWidth: 1,
+      inSlots: groupIns[i],
+      outSlots: groupOuts[i],
+      portLabels: !gateShaped(groupIns[i], groupOuts[i]),
     });
   }
 
@@ -198,25 +236,24 @@ export function collapse(
   return { nodes, nextId: nextSyntheticId };
 }
 
-function remappedPort(
-  defaultPort: number,
-  realId: number,
-  vid: number,
-  kindOf: Map<number, ComponentKind>,
-  nameOf: Map<number, string>
-): number {
-  if (realId === vid) return defaultPort;
-  const inner = kindOf.get(realId);
-  if (inner !== ComponentKind.InputPin && inner !== ComponentKind.OutputPin) {
-    return defaultPort;
-  }
-  const innerName = nameOf.get(realId);
-  if (innerName === undefined) return defaultPort;
-  switch (innerName) {
+function portByteFromName(name: string): number | null {
+  switch (name) {
     case "in": return PortName.In;
     case "a": return PortName.A;
     case "b": return PortName.B;
     case "out": return PortName.Out;
-    default: return defaultPort;
+    default: return null;
   }
+}
+
+/** The port byte of a chip pin: see `CHIP_PORT_BASE`. */
+function chipPortByte(name: string, index: number): number {
+  return portByteFromName(name) ?? CHIP_PORT_BASE + Math.min(index, 255 - CHIP_PORT_BASE);
+}
+
+/** True for a chip with a built-in gate's ports: inputs among `a`, `in`,
+ * `b`, and the one output `out`. */
+function gateShaped(ins: Slot[], outs: Slot[]): boolean {
+  if (outs.length !== 1 || outs[0].name !== "out") return false;
+  return ins.every((s) => s.name !== "out" && portByteFromName(s.name) !== null);
 }

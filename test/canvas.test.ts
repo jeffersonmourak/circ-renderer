@@ -751,6 +751,7 @@ test("the exported helpers draw the default boxes and labels without a real cont
   const args = {
     ctx, theme: baseTheme, cell: 12, component: rom,
     inputSignals: [], outputSignal: 2 as const, inputValues: [], outputValue: { value: 0n, defined: 0n, width: 8 },
+    outputSignals: [], outputValues: [],
     hovered: false,
   };
   for (const skin of [drawMemory, drawSlice, drawConcat]) expect(() => skin(args)).not.toThrow();
@@ -841,4 +842,28 @@ test("redraw repaints from the current state and changes nothing", async () => {
   canvas.redraw();
   expect(seen.length).toBeGreaterThan(before);
   expect(stub.created).toHaveLength(1);
+});
+
+// ---------------------------------------------------------------------------
+// A chip's skin is told what each of its outputs carries.
+// ---------------------------------------------------------------------------
+
+test("a chip's skin gets one signal per output port, each from its own driver", async () => {
+  // full_adder: `half_adder ha1(a, b)` exports `sum` (a xor b) and `carry` (a and b).
+  const rt = await load("project-full_adder.wasm");
+  const { theme, seen } = recordingTheme();
+  const canvas = new CircCanvas(rt, { interactive: false, theme: theme as never });
+  canvas.setInputSignal(pin(canvas, "a").id, 1);
+  canvas.setInputSignal(pin(canvas, "b").id, 1);
+  canvas.setInputSignal(pin(canvas, "cin").id, 0);
+
+  const last = (name: string) => seen.filter((c) => c.component.name === name).at(-1)!;
+  const ha1 = last("ha1");
+  expect(ha1.component.outPorts.map((p) => p.portName)).toEqual(["sum", "carry"]);
+  // 1 xor 1 is 0; 1 and 1 is 1.
+  expect(ha1.outputSignals).toEqual([0, 1]);
+  expect(ha1.inputSignals).toEqual([1, 1]);
+  // A gate still has the one output, and a sink none.
+  expect(last("cout_or").outputSignals).toEqual([1]);
+  expect(last("cout").outputSignals).toEqual([]);
 });

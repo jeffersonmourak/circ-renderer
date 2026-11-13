@@ -78,6 +78,11 @@ export interface SkinContext<C extends string = ThemeColorKey> {
   inputValues: BitValue[];
   /** Width-aware value of the output. */
   outputValue: BitValue;
+  /** Collapsed tri-state per output port (`component.outPorts` order). A
+   * gate has one; a chip one per declared output; a sink none. */
+  outputSignals: Signal[];
+  /** Width-aware value per output port (`component.outPorts` order). */
+  outputValues: BitValue[];
   hovered: boolean;
 }
 

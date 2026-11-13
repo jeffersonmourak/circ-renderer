@@ -1,5 +1,5 @@
 import { ComponentKind, PortName } from "../wasm/topology";
-import { isPrimitive, type VirtualNode } from "./types";
+import { isPrimitive, type Slot, type VirtualNode } from "./types";
 
 /**
  * Port tables — mirrors `lib/preview/layout/ports.zig`: which input ports a
@@ -11,17 +11,11 @@ import { isPrimitive, type VirtualNode } from "./types";
  * canvas draws them): a `Slice` has one `in` port, a `Concat` one stacked
  * `op<index>` port per operand.
  */
-export interface Slot {
-  name: string;
-  /** The `dstPort` byte. */
-  port: number;
-  /** Row offset from the box's top edge. */
-  row: number;
-}
+export type { Slot };
 
 /** Multiplier that keeps a neighbour's position and its port slot in one
  * integer key (`pos * SLOT_KEY_BASE + slot`). Identical to the compiler's. */
-export const SLOT_KEY_BASE = 16;
+export const SLOT_KEY_BASE = 512;
 
 const slot = (name: string, port: number, row: number): Slot => ({ name, port, row });
 
@@ -65,20 +59,8 @@ export function inputSlots(node: VirtualNode): Slot[] {
     }
     return [];
   }
-  // A subcircuit's active inputs in canonical order a, in, b on rows 1, 3, 5.
-  let hasIn = false;
-  let hasA = false;
-  let hasB = false;
-  for (const e of node.inputs) {
-    if (e.dstPort === PortName.In) hasIn = true;
-    else if (e.dstPort === PortName.A) hasA = true;
-    else if (e.dstPort === PortName.B) hasB = true;
-  }
-  const out: Slot[] = [];
-  if (hasA) out.push(slot("a", PortName.A, 1 + 2 * out.length));
-  if (hasIn) out.push(slot("in", PortName.In, 1 + 2 * out.length));
-  if (hasB) out.push(slot("b", PortName.B, 1 + 2 * out.length));
-  return out;
+  // Stage 1 lists a chip's declared inputs, in declaration order.
+  return node.inSlots ?? [];
 }
 
 /** Index of the slot that receives `dstPort`, or null. */
@@ -88,8 +70,9 @@ export function slotIndex(node: VirtualNode, dstPort: number): number | null {
   return null;
 }
 
-/** Row offset of the output port from the box's top edge. */
-export function outputRow(node: VirtualNode, height: number): number {
+/** Row offset of the output port `srcPort` from the box's top edge. A chip
+ * looks it up among its outputs and centres an unknown one. */
+export function outputRow(node: VirtualNode, height: number, srcPort: number): number {
   if (isPrimitive(node.kind)) {
     switch (node.kind.kind) {
       case ComponentKind.AndGate:
@@ -103,5 +86,6 @@ export function outputRow(node: VirtualNode, height: number): number {
         return Math.floor(height / 2);
     }
   }
+  for (const s of node.outSlots ?? []) if (s.port === srcPort) return s.row;
   return Math.floor(height / 2);
 }

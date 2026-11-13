@@ -384,9 +384,13 @@ type Skin = (ctx: {
   outputSignal: Signal;            // 0 | 1 | 2
   inputValues: BitValue[];         // width-aware value per in_port
   outputValue: BitValue;           // { value, defined, width }, masks are bigint
+  outputSignals: Signal[];         // one per component.outPorts entry
+  outputValues: BitValue[];        // width-aware value per out port
   hovered: boolean;
 }) => void;
 ```
+
+A component lists its ports as `inPorts` and `outPorts`, each `{ portName, port, coord }`, where `port` is the byte a wire's `dstPort` or `srcPort` names it by. A gate has one output and a sink has none. A collapsed chip has one input port per declared input and one output port per declared output, in declaration order; `outPort` is the first of them. When `component.portLabels` is true the layout has sized the box to hold the port names, and `drawPortLabels(ctx, theme, cell, component)` draws them as the default chip skin does.
 
 Multiply cell-space numbers by `cell` to get pixels. Use `outputValue`/`inputValues` for width-aware (bus) rendering and `outputSignal`/`inputSignals` for simple tri-state coloring. The default skins live in `src/render/skins.ts` if you want to copy a starting point.
 

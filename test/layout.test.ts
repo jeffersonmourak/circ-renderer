@@ -55,7 +55,7 @@ test("lays out a rom box with one addr port", async () => {
   expect(rom.height).toBe(3);
   expect(rom.bitWidth).toBe(8);
   expect(rom.memory).toEqual({ addrWidth: 4 });
-  expect(rom.inPorts).toEqual([{ portName: "addr", coord: { x: rom.x - 1, y: rom.y + 1 } }]);
+  expect(rom.inPorts).toEqual([{ portName: "addr", port: 4, coord: { x: rom.x - 1, y: rom.y + 1 } }]);
   expect(rom.outPort.y).toBe(rom.y + 1);
 });
 
@@ -88,4 +88,34 @@ test("layoutOptions.rowGutter spaces stacked boxes, and the default is one row",
   const wide = pinsOf(2);
   expect(wide[1].y - wide[0].y).toBe(wide[0].height + 2);
   expect(pinsOf(1)).toEqual(dflt);
+});
+
+test("a collapsed chip has one port per declared input and output", async () => {
+  // full_adder: `half_adder ha1(a, b)` and `ha2(a, b)`, each with the
+  // outputs `sum` and `carry`, and a built-in `or`.
+  const rt = await load("project-full_adder.wasm");
+  const layout = buildLayout(rt.topology);
+  const chip = (name: string) => layout.components.find((c) => !isPrimitive(c.kind) && c.name === name)!;
+
+  const ha1 = chip("ha1");
+  expect(ha1.inPorts.map((p) => p.portName)).toEqual(["a", "b"]);
+  expect(ha1.outPorts.map((p) => p.portName)).toEqual(["sum", "carry"]);
+  expect(ha1.portLabels).toBe(true);
+  // Two outputs, two pins, two port bytes.
+  expect(ha1.outPorts[0].coord.y).not.toBe(ha1.outPorts[1].coord.y);
+  expect(new Set(ha1.outPorts.map((p) => p.port)).size).toBe(2);
+
+  // Every wire that leaves the chip starts on the port it names.
+  const leaving = layout.wires.filter((w) => w.srcId === ha1.id);
+  expect(new Set(leaving.map((w) => w.srcPort)).size).toBe(2);
+  for (const w of leaving) {
+    const port = ha1.outPorts.find((p) => p.port === w.srcPort)!;
+    expect(w.segments[0].from).toEqual(port.coord);
+  }
+
+  // A chip shaped like a gate keeps a gate's box: one centred output, no names.
+  const or = chip("cout_or");
+  expect(or.portLabels).toBe(false);
+  expect(or.outPorts).toEqual([{ portName: "out", port: 3, coord: or.outPort }]);
+  expect(or.outPort.y).toBe(or.y + Math.floor(or.height / 2));
 });

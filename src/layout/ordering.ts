@@ -12,15 +12,23 @@ import type { LayeredGraph, Ordering, VirtualGraph } from "./types";
 export const MAX_ROUNDS = 4;
 export const MAX_TRANSPOSE_PASSES = 16;
 
-function endKey(graph: VirtualGraph, layered: LayeredGraph, pos: number[], node: number, dstPort: number | null): number {
+type End = { source: number } | { sink: number };
+
+/** Sort key of an edge end inside its layer: the node's position, then the
+ * port's slot on that node (0 for a dummy or an unknown port; a chip's
+ * outputs count down its right edge as its inputs do its left). */
+function endKey(graph: VirtualGraph, layered: LayeredGraph, pos: number[], node: number, end: End): number {
   const ln = layered.nodes[node];
   let s = 0;
-  if (dstPort !== null && ln.real !== null) {
-    const idx = slotIndex(graph.nodes[ln.real], dstPort);
-    // The key base is the compiler's; a concat with more operands than the
-    // base can hold is clamped, which the compiler never sees (it folds
-    // concats away) so parity is untouched.
-    if (idx !== null) s = Math.min(idx, SLOT_KEY_BASE - 1);
+  if (ln.real !== null) {
+    const real = graph.nodes[ln.real];
+    if ("sink" in end) {
+      const idx = slotIndex(real, end.sink);
+      if (idx !== null) s = Math.min(idx, SLOT_KEY_BASE - 1);
+    } else {
+      const idx = (real.outSlots ?? []).findIndex((slot) => slot.port === end.source);
+      if (idx > 0) s = Math.min(idx, SLOT_KEY_BASE - 1);
+    }
   }
   return pos[node] * SLOT_KEY_BASE + s;
 }
@@ -29,7 +37,7 @@ function countBilayer(graph: VirtualGraph, layered: LayeredGraph, pos: number[],
   const items: [number, number][] = [];
   for (const e of layered.edges) {
     if (layered.nodes[e.src].layer !== l) continue;
-    items.push([endKey(graph, layered, pos, e.src, null), endKey(graph, layered, pos, e.dst, e.dstPort)]);
+    items.push([endKey(graph, layered, pos, e.src, { source: e.srcPort }), endKey(graph, layered, pos, e.dst, { sink: e.dstPort })]);
   }
   let n = 0;
   for (let i = 0; i < items.length; i++) {
@@ -82,7 +90,7 @@ function sweepLayer(
     const edges = dir === "down" ? adj.ins[ni] : adj.outs[ni];
     for (const ei of edges) {
       const e = layered.edges[ei];
-      sum += dir === "down" ? endKey(graph, layered, pos, e.src, null) : endKey(graph, layered, pos, e.dst, e.dstPort);
+      sum += dir === "down" ? endKey(graph, layered, pos, e.src, { source: e.srcPort }) : endKey(graph, layered, pos, e.dst, { sink: e.dstPort });
       count++;
     }
     const bary: Bary = count === 0 ? [pos[ni] * SLOT_KEY_BASE, 1] : [sum, count];
